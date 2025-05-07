@@ -7,8 +7,7 @@ import torch
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 dtype = torch.double
 
-from .domain import Domain
-from botorch.acquisition.utils import project_to_target_fidelity
+from .domain import InputDomain,FidelityDomain
 import numpy as np
 from dataclasses import dataclass
 
@@ -20,7 +19,8 @@ class State:
     """
     State containing information on problem and its progress
 
-    domain = input space Domain
+    input_domain = input space InputDomain
+    fidelity_domain = fidelity space FidelityDomain
 
     index = each sample is given an index (doesn't necessarily just count the samples)
     Xs = input space samples
@@ -31,51 +31,34 @@ class State:
     Y_transform = transformation on output space for training, e.g. standardise
 
     """
-    domain: type[Domain]
-    
+    input_domain: type[InputDomain]
     index : None | npt.NDArray
     Xs : None | npt.NDArray
     Ys : None | npt.NDArray
-    Ps : None | npt.NDArray
-    Ss : None | npt.NDArray
+    Ps : None | npt.NDArray = None
+    Ss : None | npt.NDArray = None
 
-    Y_transform = Callable
+    Y_transform : None | Callable = None
 
-    costs : None | list
+    fidelity_domain: None | type[FidelityDomain] = None
 
     nsamples : int = 0
     best_value: float = -float("inf")
     best_value_transformed: float = -float("inf")
-
-    def __init__(self,
-    domain,
-    index,Xs,Ys,Ss=None,Ps=None,
-    Y_transform=lambda x : x,
-    costs=None):
-        self.domain = domain
-        self.dim = self.domain.dim
-
-        self.index = index
-        self.Xs = Xs
-        self.Ys = Ys
-        self.Ss = Ss
-        self.Ps = Ps
         
-        self.Y_transform = Y_transform
-        
-        if(costs is not None):
+    def __post_init__(self):
+        self.dim = self.input_domain.dim
+
+        if(self.Y_transform is None):
+            self.Y_transform = lambda x : x
+
+        if(self.fidelity_domain is not None):
+            self.fidelity_domain.combine_with_input_domain(self.dim)
+            self.target_fidelity = self.fidelity_domain.target_fidelity
+            self.fidelity_features = self.fidelity_domain.fidelity_features
             self.l_MultiFidelity = True
-            self.costs = costs
         else:
             self.l_MultiFidelity = False
-
-        if(self.l_MultiFidelity):
-            self.minimal_fidelity  = 0
-            self.target_fidelity   = len(self.costs)
-            self.fidelities        = [i for i in range(self.target_fidelity)]
-            self.fidelity_weights  = {self.dim: 1.0}
-            self.target_fidelities = {self.dim: self.target_fidelity}
-            self.fidelity_features = [{self.dim: f} for f in self.fidelities]
 
         if(self.Ys is not None):
             self.best_value=self.Ys.max()
@@ -95,9 +78,16 @@ class State:
 
         self.nsamples = len(self.Ys)
 
+    def get_bounds(self):
+        bounds = self.input_domain.get_bounds()
+        if(self.l_MultiFidelity):
+            fidelity_bounds = self.fidelity_domain.get_bounds()
+            bounds = np.concatenate([bounds,fidelity_bounds.reshape(-1,1)],axis=1)
+        return torch.tensor(bounds, dtype=dtype, device=device)
+
     def transform_XY(self):
         # Transform to [0,1]^d
-        Xs_unit = self.domain.transform(self.Xs)
+        Xs_unit = self.input_domain.transform(self.Xs)
         # Append fidelities if multi-fidelity
         if(self.l_MultiFidelity):
             Xs_unit = np.c_[Xs_unit,self.Ss]
@@ -111,13 +101,11 @@ class State:
 
         return X_torch,Y_torch
 
-    def get_bounds(self):
-        lb = torch.zeros(self.dim)
-        ub = torch.ones(self.dim)
-        bounds = torch.stack([lb, ub])
-        if(self.l_MultiFidelity):
-            bounds = torch.concat([bounds,torch.Tensor([self.minimal_fidelity,self.target_fidelity]).unsqueeze(-1)],dim=1)
-        return bounds
+    def inverse_transform_X(self,unit_X):
+        # Transform to input domain
+        X = self.input_domain.inverse_transform(unit_X)
+
+        return X
 
     def fidelity_project(self,XSs):
-        return project_to_target_fidelity(X=XSs, target_fidelities=self.target_fidelities)
+        return self.fidelity_domain.project(XSs)

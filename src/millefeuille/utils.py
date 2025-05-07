@@ -123,11 +123,11 @@ def suggest_next_locations(
         X_next, S_next = X_next[:,:-1],X_next[:,-1:]
 
         # Transform to real domain
-        X_next = state.domain.inverse_transform(X_next)
+        X_next = state.inverse_transform_X(X_next)
 
         return X_next, S_next
     else:
         # Transform to real domain
-        X_next = state.domain.inverse_transform(X_next)
+        X_next = state.inverse_transform_X(X_next)
 
         return X_next

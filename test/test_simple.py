@@ -22,12 +22,12 @@ def SingleFidelityForresterFunction(x):
 import millefeuille as mf
 
 # Single fidelity case
-domain = mf.Domain(1,np.zeros(1),2*np.ones(1),np.zeros(1))
+input_domain = mf.InputDomain(1,np.zeros(1),2*np.ones(1),np.zeros(1))
 
 N_init = 4
 X_init = np.random.uniform(low=0.0,high=2.0,size=(N_init,1))
 Y_init = SingleFidelityForresterFunction(X_init)
-state  = mf.State(domain,None,X_init,Y_init)
+state  = mf.State(input_domain,None,X_init,Y_init)
 surrogate = mf.SingleFidelityGPSurrogate()
 
 Nsample = 5
@@ -40,9 +40,13 @@ for _ in range(Nsample):
     state.update(X_next,Y_next)
 
 # Multi-fidelity case
-S_init = np.random.randint(low=0,high=1,size=(N_init,1))
+fidelity_domain = mf.FidelityDomain(2,costs=[0.5,1.0])
+
+S_init = np.random.randint(low=0,high=fidelity_domain.num_fidelities-1,size=(N_init,1))
 Y_init = ForresterFunction(X_init,S_init)
-state  = mf.State(domain,None,X_init,Y_init,S_init,costs=[0.5,1.0])
+state  = mf.State(input_domain,None,X_init,Y_init,
+                  Ss=S_init,fidelity_domain=fidelity_domain)
+
 surrogate = mf.MultiFidelityGPSurrogate()
 
 Nsample = 5
@@ -50,7 +54,7 @@ print('Multi fidelity updates')
 for _ in range(Nsample):
     X_next,S_next = mf.suggest_next_locations(1,state,surrogate,
     acq_function=mf.generate_MFKG_acqf,
-    cost_model=mf.generate_multifidelity_cost_model(state.costs))
+    cost_model=mf.generate_multifidelity_cost_model(fidelity_domain.costs))
     Y_next = ForresterFunction(X_next,S_next)
     print(X_next,Y_next,S_next)
     state.update(X_next,Y_next,S_next)
