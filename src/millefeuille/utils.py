@@ -120,7 +120,7 @@ def suggest_next_locations(
 
     if(state.l_MultiFidelity):
         # Separate inputs and fidelities
-        X_next, S_next = X_next[:,:-1],X_next[:,-1]
+        X_next, S_next = X_next[:,:-1],X_next[:,-1:]
 
         # Transform to real domain
         X_next = state.domain.inverse_transform(X_next)

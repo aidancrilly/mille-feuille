@@ -8,6 +8,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 dtype = torch.double
 
 from .domain import Domain
+from botorch.acquisition.utils import project_to_target_fidelity
 import numpy as np
 from dataclasses import dataclass
 

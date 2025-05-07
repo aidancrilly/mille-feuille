@@ -1,8 +1,6 @@
 import numpy as np
 import sys
-sys.path.append('./src/')
-
-import millefeuille as mf
+sys.path.append('../src/')
 
 def ForresterFunction(x,s):
     # Modified to be over [0,2]
@@ -20,6 +18,8 @@ def ForresterFunction(x,s):
 
 def SingleFidelityForresterFunction(x):
     return ForresterFunction(x,np.ones_like(x))
+
+import millefeuille as mf
 
 # Single fidelity case
 domain = mf.Domain(1,np.zeros(1),2*np.ones(1),np.zeros(1))
@@ -45,11 +45,13 @@ Y_init = ForresterFunction(X_init,S_init)
 state  = mf.State(domain,None,X_init,Y_init,S_init,costs=[0.5,1.0])
 surrogate = mf.MultiFidelityGPSurrogate()
 
+Nsample = 5
 print('Multi fidelity updates')
 for _ in range(Nsample):
     X_next,S_next = mf.suggest_next_locations(1,state,surrogate,
-    acq_function=generate_MFKG_acqf,
-    cost_model=generate_multifidelity_cost_model(state.costs))
+    acq_function=mf.generate_MFKG_acqf,
+    cost_model=mf.generate_multifidelity_cost_model(state.costs))
     Y_next = ForresterFunction(X_next,S_next)
     print(X_next,Y_next,S_next)
     state.update(X_next,Y_next,S_next)
+
