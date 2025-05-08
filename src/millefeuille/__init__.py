@@ -3,6 +3,7 @@ from .cost import *
 from .domain import *
 from .initialise import *
 from .kernel import *
+from .optimise import *
 from .simulator import *
 from .state import *
 from .surrogate import *

@@ -1,133 +1,52 @@
 """
 Defines some useful utility functions which do not fit into the defined classes
 """
+import numpy as np
 
-from .surrogate import *
-from .acquisition import *
+from .simulator import *
+from .optimise import *
 
-from botorch.optim import optimize_acqf_mixed
+def singlefidelity_serial_BO_run(Nsamples,acq_function,state,surrogate,simulator,scheduler=None):
+    if(isinstance(simulator,ExectuableSimulator) and scheduler is None):
+        print('If simulator is an ExecutableSimulator, you must provide a scheduler')
+        raise Exception
 
-import time
+    batch_size = 1
+    for _ in range(Nsamples):
+        X_next = suggest_next_locations(batch_size,state,surrogate,
+        acq_function=acq_function)
 
-DEFAULT_NUM_RESTARTS = 1
-DEFAULT_RAW_SAMPLES  = 256
+        index_next = np.array([state.index[-1]+1])
+        if(isinstance(simulator,ExectuableSimulator)):
+            P_next, Y_next = simulator(index_next, X_next, scheduler)
+        elif(isinstance(simulator,PythonSimulator)):
+            P_next, Y_next = simulator(index_next, X_next)
+        else:
+            print('simulator class not recognised, inherit for mille-feuille Simulator classes...')
 
-def generate_singlefidelity_batch(
-    state,
-    surrogate_model,
-    acq_function,
-    batch_size,
-    num_restarts,
-    raw_samples,
-):
-    if(acq_function == 'qLogExpectedImprovement'):
-        # Expected Improvement
-        ei = qLogExpectedImprovement(surrogate_model, state.best_value_transformed)
-        X_next, _ = optimize_acqf(
-            ei,
-            bounds=state.get_bounds(),
-            q=batch_size,
-            num_restarts=num_restarts,
-            raw_samples=raw_samples,
-        )
-    else:
-        print(f'Did not recognise acq_function in generate_singlefidelity_batch: {acq_function}')
-        from sys import exit
-        exit()
+        state.update(index_next,X_next=X_next,Y_next=Y_next,P_next=P_next)
 
-    return X_next
+    return state
 
-def generate_multifidelity_batch(
-    state,
-    surrogate_model,
-    cost_model,
-    generate_acq_function,
-    batch_size,
-    num_restarts,
-    raw_samples,
-    num_fantasies
-):
+def multifidelity_serial_BO_run(Nsamples,acq_function,cost_model,state,surrogate,simulator,scheduler=None):
+    if(isinstance(simulator,ExectuableSimulator) and scheduler is None):
+        print('If simulator is an ExecutableSimulator, you must provide a scheduler')
+        raise Exception
 
-    # Generate multi-fidelity acquisition function
-    mfkg_acqf = generate_acq_function(
-        state,
-        surrogate_model,
-        cost_model,
-        num_restarts=num_restarts,
-        raw_samples=raw_samples,
-        num_fantasies=num_fantasies
-        )
-    
-    # generate new candidates
-    start = time.time()
-    X_next, _ = optimize_acqf_mixed(
-        acq_function=mfkg_acqf,
-        bounds=state.get_bounds(),
-        fixed_features_list=state.fidelity_features,
-        q=batch_size,
-        num_restarts=num_restarts,
-        raw_samples=raw_samples,
-        options={"batch_limit": 5, "maxiter": 200},
-    )
-    print(f'Generating candidates, elasped time: {time.time()-start}')
+    batch_size = 1
+    for _ in range(Nsamples):
+        X_next,S_next = suggest_next_locations(batch_size,state,surrogate,
+        acq_function=acq_function,
+        cost_model=cost_model)
 
-    return X_next
+        index_next = np.array([state.index[-1]+1])
+        if(isinstance(simulator,ExectuableSimulator)):
+            P_next, Y_next = simulator(index_next, X_next, scheduler, Ss = S_next)
+        elif(isinstance(simulator,PythonSimulator)):
+            P_next, Y_next = simulator(index_next, X_next, Ss = S_next)
+        else:
+            print('simulator class not recognised, inherit for mille-feuille Simulator classes...')
 
-def suggest_next_locations(
-    batch_size,
-    state,
-    surrogate,
-    acq_function,
-    cost_model=None,
-    num_restarts=DEFAULT_NUM_RESTARTS,
-    raw_samples=DEFAULT_RAW_SAMPLES,
-    num_fantasies=DEFAULT_NUM_FANTASIES
-):
-    # Check inputs
-    if(state.l_MultiFidelity and cost_model is None):
-        print('Error in suggest_next_locations:')
-        print('Please provide cost model and generator of acquisition function to enable multi-fidelity...')
-        from sys import exit
-        exit()
+        state.update(index_next,X_next=X_next,Y_next=Y_next,P_next=P_next,S_next=S_next)
 
-    # Train the model
-    surrogate.fit(state)
-
-    # Create a batch
-    if(state.l_MultiFidelity):
-        X_next = generate_multifidelity_batch(
-            state=state,
-            surrogate_model=surrogate.model,
-            cost_model=cost_model,
-            generate_acq_function=acq_function,
-            batch_size=batch_size,
-            num_restarts=num_restarts,
-            raw_samples=raw_samples,
-            num_fantasies=num_fantasies,
-        )
-    else:
-        X_next = generate_singlefidelity_batch(
-            state=state,
-            surrogate_model=surrogate.model,
-            acq_function=acq_function,
-            batch_size=batch_size,
-            num_restarts=num_restarts,
-            raw_samples=raw_samples,
-        )
-
-    # Get to CPU and remove any AD info...
-    X_next = X_next.detach().cpu().numpy()
-
-    if(state.l_MultiFidelity):
-        # Separate inputs and fidelities
-        X_next, S_next = X_next[:,:-1],X_next[:,-1:]
-
-        # Transform to real domain
-        X_next = state.inverse_transform_X(X_next)
-
-        return X_next, S_next
-    else:
-        # Transform to real domain
-        X_next = state.inverse_transform_X(X_next)
-
-        return X_next
+    return state

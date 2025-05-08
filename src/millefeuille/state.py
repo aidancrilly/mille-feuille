@@ -65,9 +65,11 @@ class State:
             self.best_value_transformed = self.Y_transform(self.best_value)
             self.nsamples = len(self.Ys)
 
-    def update(self,X_next,Y_next,S_next=None,P_next=None):
+    def update(self,index_next,X_next,Y_next,S_next=None,P_next=None):
         self.best_value = max(self.best_value, Y_next.max())
         self.best_value_transformed = self.Y_transform(self.best_value)
+
+        self.index = np.append(self.index,index_next,axis=0)
 
         self.Xs = np.append(self.Xs,X_next,axis=0)
         self.Ys = np.append(self.Ys,Y_next,axis=0)
