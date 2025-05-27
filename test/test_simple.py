@@ -45,8 +45,7 @@ surrogate = mf.SingleFidelityGPSurrogate()
 acq_function = 'qLogExpectedImprovement'
 
 Nsamples = 5
-state = mf.singlefidelity_serial_BO_run(Nsamples,acq_function,state,surrogate,simulator)
-print(state.Xs,state.Ys)
+state = mf.singlefidelity_serial_BO_run(Nsamples,acq_function,state,surrogate,simulator,csv_name='SingleFidelityForrester.csv')
 
 # Multi-fidelity case
 fidelity_domain = mf.FidelityDomain(2,costs=[0.5,1.0])
@@ -61,5 +60,4 @@ acq_function = mf.generate_MFKG_acqf
 cost_model = mf.generate_multifidelity_cost_model(fidelity_domain.costs)
 
 Nsamples = 5
-state = mf.multifidelity_serial_BO_run(Nsamples,acq_function,cost_model,state,surrogate,simulator)
-print(state.Xs,state.Ys,state.Ss)
+state = mf.multifidelity_serial_BO_run(Nsamples,acq_function,cost_model,state,surrogate,simulator,csv_name='MultiFidelityForrester.csv')

@@ -6,7 +6,7 @@ import numpy as np
 from .simulator import *
 from .optimise import *
 
-def singlefidelity_serial_BO_run(Nsamples,acq_function,state,surrogate,simulator,scheduler=None):
+def singlefidelity_serial_BO_run(Nsamples,acq_function,state,surrogate,simulator,scheduler=None,csv_name=None):
     if(isinstance(simulator,ExectuableSimulator) and scheduler is None):
         print('If simulator is an ExecutableSimulator, you must provide a scheduler')
         raise Exception
@@ -25,10 +25,12 @@ def singlefidelity_serial_BO_run(Nsamples,acq_function,state,surrogate,simulator
             print('simulator class not recognised, inherit for mille-feuille Simulator classes...')
 
         state.update(index_next,X_next=X_next,Y_next=Y_next,P_next=P_next)
+        if(csv_name is not None):
+            state.to_csv(csv_name)
 
     return state
 
-def multifidelity_serial_BO_run(Nsamples,acq_function,cost_model,state,surrogate,simulator,scheduler=None):
+def multifidelity_serial_BO_run(Nsamples,acq_function,cost_model,state,surrogate,simulator,scheduler=None,csv_name=None):
     if(isinstance(simulator,ExectuableSimulator) and scheduler is None):
         print('If simulator is an ExecutableSimulator, you must provide a scheduler')
         raise Exception
@@ -48,5 +50,7 @@ def multifidelity_serial_BO_run(Nsamples,acq_function,cost_model,state,surrogate
             print('simulator class not recognised, inherit for mille-feuille Simulator classes...')
 
         state.update(index_next,X_next=X_next,Y_next=Y_next,P_next=P_next,S_next=S_next)
+        if(csv_name is not None):
+            state.to_csv(csv_name)
 
     return state
