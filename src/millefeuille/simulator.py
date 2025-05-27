@@ -98,5 +98,5 @@ class ExectuableSimulator(ABC):
     def __call__(self, indices : npt.NDArray, Xs : npt.NDArray, scheduler : type[Scheduler], Ss : None | npt.NDArray = None):
         self.prepare_inputs(indices, Xs, Ss)
         self.launch(indices, Xs, scheduler, Ss)
-        Ps, Ys = self.postprocess(indices, Xs, scheduler, Ss)
+        Ps, Ys = self.postprocess(indices, Xs, Ss)
         return Ps, Ys
