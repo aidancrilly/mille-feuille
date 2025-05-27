@@ -88,7 +88,7 @@ class SingleFidelityGPSurrogate(BaseGPSurrogate):
 
         return X_torch,Y_torch
 
-    def fit(self,state: State,noise_interval=DEFAULT_NOISE_INTERVAL,lengthscale_interval=DEFAULT_LENGTHSCALE_INTERVAL):
+    def fit(self,state: State,noise_interval=DEFAULT_NOISE_INTERVAL,lengthscale_interval=DEFAULT_LENGTHSCALE_INTERVAL,approx_mll=False):
         X_torch,Y_torch = self.get_XY(state)
 
         self.likelihood = GaussianLikelihood(noise_constraint=Interval(*noise_interval))
@@ -104,7 +104,7 @@ class SingleFidelityGPSurrogate(BaseGPSurrogate):
         mll = ExactMarginalLogLikelihood(self.model.likelihood, self.model)
 
         # Fit the model
-        fit_gpytorch_mll(mll)
+        fit_gpytorch_mll(mll, approx_mll=approx_mll)
 
     def predict(self, state: State, Xs):
         Xs_unit = state.transform_X(Xs)
@@ -135,7 +135,7 @@ class MultiObjectiveSingleFidelityGPSurrogate(BaseGPSurrogate):
         X_torch, Y_torch = state.transform_XY()
         return X_torch, Y_torch
 
-    def fit(self, state: State, noise_interval=DEFAULT_NOISE_INTERVAL, lengthscale_interval=DEFAULT_LENGTHSCALE_INTERVAL):
+    def fit(self, state: State, noise_interval=DEFAULT_NOISE_INTERVAL, lengthscale_interval=DEFAULT_LENGTHSCALE_INTERVAL,approx_mll=False):
         """
         Trains a GP for each output key separately.
         """
@@ -150,7 +150,7 @@ class MultiObjectiveSingleFidelityGPSurrogate(BaseGPSurrogate):
             )
             model = SingleTaskGP(X_torch, Y_torch[:,ikey], covar_module=covar_module, likelihood=likelihood)
             mll = ExactMarginalLogLikelihood(model.likelihood, model)
-            fit_gpytorch_mll(mll)
+            fit_gpytorch_mll(mll, approx_mll=approx_mll)
 
             model.eval()
             likelihood.eval()
@@ -195,7 +195,7 @@ class MultiFidelityGPSurrogate:
 
         return X_torch,Y_torch
 
-    def fit(self,state,noise_interval=DEFAULT_NOISE_INTERVAL,lengthscale_interval=DEFAULT_LENGTHSCALE_INTERVAL):
+    def fit(self,state,noise_interval=DEFAULT_NOISE_INTERVAL,lengthscale_interval=DEFAULT_LENGTHSCALE_INTERVAL,approx_mll=False):
         X_torch,Y_torch = self.get_XY(state)
 
         self.likelihood = GaussianLikelihood(noise_constraint=Interval(*noise_interval))
@@ -207,4 +207,4 @@ class MultiFidelityGPSurrogate:
         mll = ExactMarginalLogLikelihood(self.model.likelihood, self.model)
 
         # Fit the model
-        fit_gpytorch_mll(mll)
+        fit_gpytorch_mll(mll, approx_mll=approx_mll)
