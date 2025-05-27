@@ -115,7 +115,7 @@ class State:
         if(self.Ys is not None):
             self.Y_scaler.fit(self.Ys)
             self.best_value=self.Ys.max(axis=0)
-            self.best_value_transformed = self.Y_scaler.transform([[self.best_value]])
+            self.best_value_transformed = self.Y_scaler.transform([self.best_value])
             self.nsamples = self.Ys.shape[0]
 
     def update(self,index_next,X_next,Y_next,S_next=None,P_next=None,refit_scaler=True):
@@ -126,7 +126,7 @@ class State:
         index_next, X_next, Y_next, P_next, S_next = remove_nan_rows([index_next, X_next, Y_next, P_next, S_next])
 
         self.best_value = max(self.best_value, Y_next.max(axis=0))
-        self.best_value_transformed = self.Y_scaler.transform([[self.best_value]])
+        self.best_value_transformed = self.Y_scaler.transform([self.best_value])
 
         self.index = np.append(self.index,index_next,axis=0)
 
