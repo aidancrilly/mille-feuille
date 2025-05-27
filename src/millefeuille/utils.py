@@ -11,6 +11,7 @@ import numpy as np
 
 def probabilistic_threshold_sampling(
     domain,
+    state,
     sampler,
     surrogate,
     initial_samples,
@@ -24,6 +25,7 @@ def probabilistic_threshold_sampling(
 
     Parameters:
         domain: InputDomain object
+        state: State object
         sampler: QMC sampler (e.g. Sobol)
         surrogate: mille-feuille-compatible surrogate (must support predict(domain, X))
         initial_samples: number of samples to draw
@@ -43,7 +45,7 @@ def probabilistic_threshold_sampling(
     x_all = domain.inverse_transform(x_unit)
 
     # Predict mean and std from GP
-    prediction = surrogate.predict(domain, x_all)
+    prediction = surrogate.predict(state, x_all)
 
     if isinstance(prediction, dict):
         if isinstance(target_key, int):
@@ -70,6 +72,7 @@ def probabilistic_threshold_sampling(
 
 def surrogate_threshold_sampling(
         domain,
+        state,
         sampler,
         surrogate,
         initial_samples,
@@ -81,6 +84,7 @@ def surrogate_threshold_sampling(
 
     Parameters:
         domain: InputDomain object
+        state: State object
         sampler: QMC sampler (e.g., Sobol)
         surrogate: mille-feuille-style surrogate with .predict(domain, Xs) method
         initial_samples: int, number of candidate points
@@ -97,7 +101,7 @@ def surrogate_threshold_sampling(
     x_all = domain.inverse_transform(x_unit)
 
     # Predict mean and std from GP
-    prediction = surrogate.predict(domain, x_all)
+    prediction = surrogate.predict(state, x_all)
 
     if isinstance(prediction, dict):
         if isinstance(target_key, int):
