@@ -13,9 +13,9 @@ import os
 import csv
 import h5py
 import numpy as np
+from sklearn.preprocessing import StandardScaler
 import numpy.typing as npt
 from dataclasses import dataclass
-from typing import Callable
 
 def check_for_2D_shape(arrays):
     # Ensure correct shape from each non-None array
@@ -74,7 +74,7 @@ class State:
     Ps = additional scalar values to store
     Ss = model fidelities of samples
 
-    Y_transform = transformation on output space for training, e.g. standardise
+    Y_scaler = transformation on output space for training, e.g. standardise
 
     """
     input_domain: type[InputDomain]
@@ -84,7 +84,7 @@ class State:
     Ps : None | npt.NDArray = None
     Ss : None | npt.NDArray = None
 
-    Y_transform : None | Callable = None
+    Y_scaler : None | object = None
 
     fidelity_domain: None | type[FidelityDomain] = None
 
@@ -95,8 +95,8 @@ class State:
     def __post_init__(self):
         self.dim = self.input_domain.dim
 
-        if(self.Y_transform is None):
-            self.Y_transform = lambda x : x
+        if(self.Y_scaler is None):
+            self.Y_scaler = StandardScaler()
 
         if(self.fidelity_domain is not None):
             self.fidelity_domain.combine_with_input_domain(self.dim)
@@ -113,19 +113,20 @@ class State:
         self.index, self.Xs, self.Ys, self.Ps, self.Ss = remove_nan_rows([self.index, self.Xs, self.Ys, self.Ps, self.Ss])
 
         if(self.Ys is not None):
-            self.best_value=self.Ys.max()
-            self.best_value_transformed = self.Y_transform(self.best_value)
-            self.nsamples = len(self.Ys)
+            self.Y_scaler.fit(self.Ys)
+            self.best_value=self.Ys.max(axis=0)
+            self.best_value_transformed = self.Y_scaler.transform([[self.best_value]])
+            self.nsamples = self.Ys.shape[0]
 
-    def update(self,index_next,X_next,Y_next,S_next=None,P_next=None):
+    def update(self,index_next,X_next,Y_next,S_next=None,P_next=None,refit_scaler=True):
         # Check for 1D arrays
         index_next, X_next, Y_next, P_next, S_next = check_for_2D_shape([index_next, X_next, Y_next, P_next, S_next])
 
         # Remove NaN-ed indices
         index_next, X_next, Y_next, P_next, S_next = remove_nan_rows([index_next, X_next, Y_next, P_next, S_next])
 
-        self.best_value = max(self.best_value, Y_next.max())
-        self.best_value_transformed = self.Y_transform(self.best_value)
+        self.best_value = max(self.best_value, Y_next.max(axis=0))
+        self.best_value_transformed = self.Y_scaler.transform([[self.best_value]])
 
         self.index = np.append(self.index,index_next,axis=0)
 
@@ -136,7 +137,10 @@ class State:
         if(S_next is not None):
             self.Ss = np.append(self.Ss,S_next,axis=0)
 
-        self.nsamples = len(self.Ys)
+        if refit_scaler and self.Ys.shape[0] > 1:
+            self.Y_scaler.fit(self.Ys)
+
+        self.nsamples = self.Ys.shape[0]
 
     def get_bounds(self):
         bounds = self.input_domain.get_bounds()
@@ -153,7 +157,7 @@ class State:
             Xs_unit = np.c_[Xs_unit,self.Ss]
 
         # Y transformation, e.g. standardise
-        train_Y = self.Y_transform(self.Ys)
+        train_Y = self.Y_scaler.transform(self.Ys)
 
         # Convert to torch tensors
         X_torch = torch.tensor(Xs_unit, dtype=dtype, device=device)
@@ -161,11 +165,37 @@ class State:
 
         return X_torch,Y_torch
 
+    def transform_X(self,X):
+        # Transform to input domain
+        unit_X = self.input_domain.transform(X)
+
+        return unit_X
+
     def inverse_transform_X(self,unit_X):
         # Transform to input domain
         X = self.input_domain.inverse_transform(unit_X)
 
         return X
+
+    def inverse_transform_Y(self, scaled_Ys, scaled_Y_stds=None):
+        """
+        Inverse-transforms scaled Y values and optionally their std deviations.
+
+        Parameters:
+            scaled_Ys: np.ndarray, transformed Y values
+            scaled_Y_stds: np.ndarray, std devs in transformed space (no mean shift)
+
+        Returns:
+            Tuple of (unscaled_Ys, unscaled_stds) or unscaled_Ys if stds not provided
+        """
+        unscaled_Ys = self.Y_scaler.inverse_transform(scaled_Ys)
+
+        if scaled_Y_stds is not None:
+            std_scale = np.sqrt(self.Y_scaler.var_) if hasattr(self.Y_scaler, "var_") else self.Y_scaler.scale_
+            unscaled_stds = scaled_Y_stds * std_scale
+            return unscaled_Ys, unscaled_stds
+
+        return unscaled_Ys
 
     def fidelity_project(self,XSs):
         return self.fidelity_domain.project(XSs)
@@ -202,7 +232,7 @@ class State:
             f.attrs["best_value_transformed"] = self.best_value_transformed
 
     @staticmethod
-    def load(filename: str, Y_transform : None | Callable):
+    def load(filename: str, Y_scaler : None | object):
         with h5py.File(filename, 'r') as f:
             # Input domain
             input_domain = InputDomain(
@@ -235,7 +265,7 @@ class State:
                 Ys=Ys,
                 Ps=Ps,
                 Ss=Ss,
-                Y_transform=Y_transform,
+                Y_scaler=Y_scaler,
                 fidelity_domain=fidelity_domain,
                 nsamples=int(f.attrs["nsamples"]),
                 best_value=float(f.attrs["best_value"]),

@@ -3,8 +3,9 @@ Defines a wrapper over your simulator which is ran on HPC resources
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Optional,Sequence
 
+import numpy as np
 import numpy.typing as npt
 
 class PythonSimulator(ABC):
@@ -14,10 +15,39 @@ class PythonSimulator(ABC):
         pass
 
 class Scheduler(ABC):
+    """
+    Abstract base class for scheduling and launching parallel simulations on HPC systems.
+    """
+
+    @abstractmethod
+    def launch_jobs(self, exe: str, nproc: int, inputs: Sequence[str], indices: Sequence[int]):
+        """
+        Launches simulation jobs in parallel.
+
+        Parameters:
+            exe: Path to the MPI-enabled executable
+            nproc: Number of processes per job
+            inputs: List of input file paths
+            indices: List of run indices (for logging/output naming)
+        """
+        pass
 
     @property
     @abstractmethod
-    def MPI_program(self) -> str:
+    def mpiexec(self) -> str:
+        """Path to `mpiexec` or equivalent MPI launch command."""
+        pass
+
+    @property
+    @abstractmethod
+    def output_dir(self) -> str:
+        """Directory to store stdout/stderr log files."""
+        pass
+
+    @property
+    @abstractmethod
+    def index_length(self) -> int:
+        """Length for zero-padding output filenames."""
         pass
 
 class ExectuableSimulator(ABC):
