@@ -20,7 +20,7 @@ class Scheduler(ABC):
     """
 
     @abstractmethod
-    def launch_jobs(self, exe: str, nproc: int, inputs: Sequence[str], indices: Sequence[int]):
+    def launch_jobs(self, exe: str, nproc: int, inputs: Sequence[str], indices: Sequence[str]):
         """
         Launches simulation jobs in parallel.
 
@@ -42,12 +42,6 @@ class Scheduler(ABC):
     @abstractmethod
     def output_dir(self) -> str:
         """Directory to store stdout/stderr log files."""
-        pass
-
-    @property
-    @abstractmethod
-    def index_length(self) -> int:
-        """Length for zero-padding output filenames."""
         pass
 
 class ExectuableSimulator(ABC):
