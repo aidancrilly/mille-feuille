@@ -117,17 +117,17 @@ def surrogate_threshold_sampling(
 
     return x_all, y_pred, mask
 
-def singlefidelity_serial_BO_run(Nsamples,acq_function,state,surrogate,simulator,scheduler=None,csv_name=None):
+def singlefidelity_BO_run(Nsamples,batch_size,acq_function,state,surrogate,simulator,scheduler=None,csv_name=None,verbose=False):
     if(isinstance(simulator,ExectuableSimulator) and scheduler is None):
         print('If simulator is an ExecutableSimulator, you must provide a scheduler')
         raise Exception
 
-    batch_size = 1
     for _ in range(Nsamples):
         X_next = suggest_next_locations(batch_size,state,surrogate,
-        acq_function=acq_function)
+        acq_function=acq_function,
+        verbose=verbose)
 
-        index_next = np.array([state.index[-1]+1])
+        index_next = state.index[-1] + np.arange(batch_size) + 1
         if(isinstance(simulator,ExectuableSimulator)):
             P_next, Y_next = simulator(index_next, X_next, scheduler)
         elif(isinstance(simulator,PythonSimulator)):
@@ -141,18 +141,18 @@ def singlefidelity_serial_BO_run(Nsamples,acq_function,state,surrogate,simulator
 
     return state
 
-def multifidelity_serial_BO_run(Nsamples,acq_function,cost_model,state,surrogate,simulator,scheduler=None,csv_name=None):
+def multifidelity_BO_run(Nsamples,batch_size,acq_function,cost_model,state,surrogate,simulator,scheduler=None,csv_name=None,verbose=False):
     if(isinstance(simulator,ExectuableSimulator) and scheduler is None):
         print('If simulator is an ExecutableSimulator, you must provide a scheduler')
         raise Exception
 
-    batch_size = 1
     for _ in range(Nsamples):
         X_next,S_next = suggest_next_locations(batch_size,state,surrogate,
         acq_function=acq_function,
-        cost_model=cost_model)
+        cost_model=cost_model,
+        verbose=verbose)
 
-        index_next = np.array([state.index[-1]+1])
+        index_next = state.index[-1] + np.arange(batch_size) + 1
         if(isinstance(simulator,ExectuableSimulator)):
             P_next, Y_next = simulator(index_next, X_next, scheduler, Ss = S_next)
         elif(isinstance(simulator,PythonSimulator)):

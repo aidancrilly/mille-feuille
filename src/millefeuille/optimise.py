@@ -78,7 +78,8 @@ def suggest_next_locations(
     cost_model=None,
     num_restarts=DEFAULT_NUM_RESTARTS,
     raw_samples=DEFAULT_RAW_SAMPLES,
-    num_fantasies=DEFAULT_NUM_FANTASIES
+    num_fantasies=DEFAULT_NUM_FANTASIES,
+    verbose=False
 ):
     # Check inputs
     if(state.l_MultiFidelity and cost_model is None):
@@ -88,9 +89,18 @@ def suggest_next_locations(
         exit()
 
     # Train the model
+    if verbose:
+        start = time.time()
+        print('Training surrogate...')
     surrogate.fit(state)
+    if verbose:
+        print(f'Surrogate trained in {time.time()-start} s')
 
     # Create a batch
+    if verbose:
+        start = time.time()
+        print('Generating candidates ...')
+
     if(state.l_MultiFidelity):
         X_next = generate_multifidelity_batch(
             state=state,
@@ -111,6 +121,9 @@ def suggest_next_locations(
             num_restarts=num_restarts,
             raw_samples=raw_samples,
         )
+
+    if verbose:
+        print(f'Candidates generated in {time.time()-start} s')
 
     # Get to CPU and remove any AD info...
     X_next = X_next.detach().cpu().numpy()
