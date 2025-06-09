@@ -115,7 +115,7 @@ class SingleFidelityGPSurrogate(BaseGPSurrogate):
             var = post.variance.cpu().numpy().reshape(-1, 1)
             std = np.sqrt(var)
         mean, std = state.inverse_transform_Y(mean, std)
-        return np.concatenate([mean, std], axis=1)
+        return {'mean' : mean, 'std' : std}
 
     def eval(self):
         self.model.eval()
@@ -179,7 +179,7 @@ class MultiObjectiveSingleFidelityGPSurrogate(BaseGPSurrogate):
         predictions = {}
         for ikey in range(self.num_objective):
             mean, std = means[:,ikey], stds[:,ikey]
-            predictions[ikey] = (mean, std)
+            predictions[ikey] = {'mean' : mean, 'std' : std}
 
         return predictions
 class MultiFidelityGPSurrogate:
@@ -218,7 +218,7 @@ class MultiFidelityGPSurrogate:
             var = post.variance.cpu().numpy().reshape(-1, state.fidelity_domain.num_fidelities)
             std = np.sqrt(var)
         mean, std = state.inverse_transform_Y(mean, std)
-        return {'mean' : mean, 'std' : std}
+        return {fid : {'mean' : mean[:,fid], 'std' : std[:,fid]} for fid in range(state.fidelity_domain.num_fidelities)}
 
     def eval(self):
         self.model.eval()

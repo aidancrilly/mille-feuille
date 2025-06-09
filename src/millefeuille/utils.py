@@ -16,7 +16,7 @@ def probabilistic_threshold_sampling(
     surrogate,
     initial_samples,
     threshold_value,
-    target_key=0,
+    target_key=None,
     random_draws=None
 ):
     """
@@ -30,7 +30,7 @@ def probabilistic_threshold_sampling(
         surrogate: mille-feuille-compatible surrogate (must support predict(domain, X))
         initial_samples: number of samples to draw
         threshold_value: threshold value to compare against
-        target_key: int or str — selects surrogate output (default = 0)
+        target_key: int or str — selects surrogate output
         random_draws: optional np.ndarray of uniform(0,1) values of shape (initial_samples,)
                       if None, will be generated internally
 
@@ -45,16 +45,17 @@ def probabilistic_threshold_sampling(
     x_all = domain.inverse_transform(x_unit)
 
     # Predict mean and std from GP
-    prediction = surrogate.predict(state, x_all)
+    predictions = surrogate.predict(state, x_all)
 
-    if isinstance(prediction, dict):
-        if isinstance(target_key, int):
-            key = list(prediction.keys())[target_key]
-        else:
-            key = target_key
-        mean, std = prediction[key]
+    if(target_key is not None):
+        prediction = predictions[target_key]
     else:
-        mean, std = prediction[:, 0], prediction[:, 1]
+        if('mean' not in predictions.keys()):
+            prediction = predictions[predictions.keys()[0]]
+        else:
+            prediction = predictions
+
+    mean, std = prediction['mean'], prediction['std']
 
     # Compute probability P(y > threshold)
     mean = mean.flatten()
@@ -77,7 +78,7 @@ def surrogate_threshold_sampling(
         surrogate,
         initial_samples,
         surrogate_threshold,
-        target_key=0):
+        target_key=None):
     """
     Draws samples from the sampler, evaluates the surrogate model,
     and selects those above a specified threshold.
@@ -89,7 +90,7 @@ def surrogate_threshold_sampling(
         surrogate: mille-feuille-style surrogate with .predict(domain, Xs) method
         initial_samples: int, number of candidate points
         surrogate_threshold: float, threshold to apply on predicted mean
-        target_key: int or str — selects surrogate output (default = 0)
+        target_key: int or str — selects surrogate output
 
     Returns:
         x_all: np.ndarray of all candidate input samples
@@ -101,16 +102,17 @@ def surrogate_threshold_sampling(
     x_all = domain.inverse_transform(x_unit)
 
     # Predict mean and std from GP
-    prediction = surrogate.predict(state, x_all)
+    predictions = surrogate.predict(state, x_all)
 
-    if isinstance(prediction, dict):
-        if isinstance(target_key, int):
-            key = list(prediction.keys())[target_key]
-        else:
-            key = target_key
-        mean, _ = prediction[key]
+    if(target_key is not None):
+        prediction = predictions[target_key]
     else:
-        mean, _ = prediction[:, 0], prediction[:, 1]
+        if('mean' not in predictions.keys()):
+            prediction = predictions[predictions.keys()[0]]
+        else:
+            prediction = predictions
+
+    mean, std = prediction['mean'], prediction['std']
 
     y_pred = mean
     mask = mean > surrogate_threshold
