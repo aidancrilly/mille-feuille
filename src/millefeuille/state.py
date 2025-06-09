@@ -168,6 +168,11 @@ class State:
     def transform_X(self,X):
         # Transform to input domain
         unit_X = self.input_domain.transform(X)
+        if(self.l_MultiFidelity):
+            # X for each fidelity
+            Ss = np.tile(np.array(self.fidelity_domain.fidelities),(unit_X.shape[0],)).reshape(-1,1)
+            unit_X = np.repeat(unit_X,repeats=self.fidelity_domain.num_fidelities,axis=0)
+            unit_X = np.c_[unit_X,Ss]
 
         return unit_X
 

@@ -10,7 +10,7 @@ import numpy as np
 
 from botorch.fit import fit_gpytorch_mll
 from botorch.models import SingleTaskGP
-from botorch.models.gp_regression_fidelity import SingleTaskMultiFidelityGP
+from .kernel import ModifiedSingleTaskMultiFidelityGP
 
 from gpytorch.constraints import Interval
 from gpytorch.kernels import MaternKernel, ScaleKernel
@@ -182,7 +182,6 @@ class MultiObjectiveSingleFidelityGPSurrogate(BaseGPSurrogate):
             predictions[ikey] = (mean, std)
 
         return predictions
-
 class MultiFidelityGPSurrogate:
 
     def __init__(self):
@@ -200,11 +199,27 @@ class MultiFidelityGPSurrogate:
 
         self.likelihood = GaussianLikelihood(noise_constraint=Interval(*noise_interval))
 
-        self.model = SingleTaskMultiFidelityGP(
-                X_torch, Y_torch, data_fidelities = [state.dim], likelihood=self.likelihood
+        self.model = ModifiedSingleTaskMultiFidelityGP(
+                X_torch, Y_torch,
+                likelihood=self.likelihood, outcome_transform= None
             )
         
         mll = ExactMarginalLogLikelihood(self.model.likelihood, self.model)
 
         # Fit the model
         fit_gpytorch_mll(mll, approx_mll=approx_mll)
+
+    def predict(self, state: State, Xs):
+        Xs_unit = state.transform_X(Xs)
+        test_X = torch.tensor(Xs_unit, dtype=torch.double, device=device)
+        with torch.no_grad():
+            post = self.likelihood(self.model(test_X))
+            mean = post.mean.cpu().numpy().reshape(-1, state.fidelity_domain.num_fidelities)
+            var = post.variance.cpu().numpy().reshape(-1, state.fidelity_domain.num_fidelities)
+            std = np.sqrt(var)
+        mean, std = state.inverse_transform_Y(mean, std)
+        return {'mean' : mean, 'std' : std}
+
+    def eval(self):
+        self.model.eval()
+        self.likelihood.eval()

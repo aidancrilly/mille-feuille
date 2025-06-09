@@ -68,8 +68,8 @@ class FidelityDomain:
             assert len(self.costs) == self.num_fidelities
 
         self.minimal_fidelity  = 0
-        self.target_fidelity   = self.num_fidelities
-        self.fidelities        = [i for i in range(self.target_fidelity)]
+        self.target_fidelity   = self.num_fidelities-1
+        self.fidelities        = [i for i in range(self.num_fidelities)]
 
     def combine_with_input_domain(self,input_dim):
         self.fidelity_weights  = {input_dim: 1.0}
