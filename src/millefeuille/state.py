@@ -289,7 +289,8 @@ class State:
         # Combine data columns
         indices = check_for_2D_shape([self.index])[0] # Ensure 2D index
         cols = [indices]
-        header += [f"index{i}" for i in range(self.Ss.shape[1])]
+        header = []
+        header += [f"index{i}" for i in range(indices.shape[1])]
 
         if self.Ss is not None:
             cols.append(self.Ss)
