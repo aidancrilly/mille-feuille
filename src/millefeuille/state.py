@@ -287,18 +287,19 @@ class State:
             raise ValueError("index, Xs, and Ys must not be None")
 
         # Combine data columns
-        cols = [self.index.reshape(-1, 1)]  # Ensure 2D index
-        header = ["index"]
+        indices = check_for_2D_shape([self.index])[0] # Ensure 2D index
+        cols = [indices]
+        header += [f"index{i}" for i in range(self.Ss.shape[1])]
 
+        if self.Ss is not None:
+            cols.append(self.Ss)
+            header += [f"s{i}" for i in range(self.Ss.shape[1])]
         if self.Xs is not None:
             cols.append(self.Xs)
             header += [f"x{i}" for i in range(self.Xs.shape[1])]
         if self.Ps is not None:
             cols.append(self.Ps)
             header += [f"p{i}" for i in range(self.Ps.shape[1])]
-        if self.Ss is not None:
-            cols.append(self.Ss)
-            header += [f"s{i}" for i in range(self.Ss.shape[1])]
         if self.Ys is not None:
             cols.append(self.Ys)
             header += [f"y{i}" for i in range(self.Ys.shape[1])]
