@@ -59,7 +59,6 @@ def remove_nan_rows(arrays):
     ]
     return cleaned_arrays
 
-
 @dataclass
 class State:
     """
@@ -83,6 +82,12 @@ class State:
     Ys : None | npt.NDArray
     Ps : None | npt.NDArray = None
     Ss : None | npt.NDArray = None
+
+    index_names : None | list[str] = None
+    X_names : None | list[str] = None
+    Y_names : None | list[str] = None
+    P_names : None | list[str] = None
+    S_names : None | list[str] = None
 
     Y_scaler : None | object = None
 
@@ -111,6 +116,15 @@ class State:
 
         # Remove NaN-ed indices
         self.index, self.Xs, self.Ys, self.Ps, self.Ss = remove_nan_rows([self.index, self.Xs, self.Ys, self.Ps, self.Ss])
+
+        # Check name lengths against arrays
+        self.index_names = self.auto_naming_and_check(self.index_names,self.index.shape,default_prefix='index_')
+        self.X_names = self.auto_naming_and_check(self.X_names,self.Xs.shape,default_prefix='x_')
+        self.Y_names = self.auto_naming_and_check(self.Y_names,self.Ys.shape,default_prefix='y_')
+        if(self.Ps is not None):
+            self.P_names = self.auto_naming_and_check(self.P_names,self.Ps.shape,default_prefix='p_')
+        if(self.Ss is not None):
+            self.S_names = self.auto_naming_and_check(self.S_names,self.Ss.shape,default_prefix='s_')
 
         if(self.Ys is not None):
             self.Y_scaler.fit(self.Ys)
@@ -205,6 +219,13 @@ class State:
     def fidelity_project(self,XSs):
         return self.fidelity_domain.project(XSs)
 
+    def auto_naming_and_check(self,names,array_shape,default_prefix):
+        if names is None:
+            names = [f"{default_prefix}{i}" for i in range(array_shape[1])]
+        else: # Check shape
+            assert len(names) == array_shape[1]
+        return names
+
     def save(self, filename: str):
         with h5py.File(filename, 'w') as f:
             # Input domain
@@ -289,20 +310,21 @@ class State:
         # Combine data columns
         indices = check_for_2D_shape([self.index])[0] # Ensure 2D index
         cols = [indices]
-        header += [f"index{i}" for i in range(self.Ss.shape[1])]
+        header = []
+        header += self.index_names
 
         if self.Ss is not None:
             cols.append(self.Ss)
-            header += [f"s{i}" for i in range(self.Ss.shape[1])]
+            header += self.S_names
         if self.Xs is not None:
             cols.append(self.Xs)
-            header += [f"x{i}" for i in range(self.Xs.shape[1])]
+            header += self.X_names
         if self.Ps is not None:
             cols.append(self.Ps)
-            header += [f"p{i}" for i in range(self.Ps.shape[1])]
+            header += self.P_names
         if self.Ys is not None:
             cols.append(self.Ys)
-            header += [f"y{i}" for i in range(self.Ys.shape[1])]
+            header += self.Y_names
 
         data = np.hstack(cols)
 

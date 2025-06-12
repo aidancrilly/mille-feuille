@@ -60,21 +60,26 @@ class BaseGPSurrogate(ABC):
 
     def eval(self):
         """
-        Optionally set internal models to evaluation mode (if using PyTorch).
+        Set internal models to evaluation mode (if using PyTorch).
         """
-        pass
+        self.model.eval()
+        self.likelihood.eval()
 
     def save(self, filepath: str):
         """
-        Optionally save trained model to disk.
+        Save trained model to disk.
         """
-        raise NotImplementedError("Saving not implemented for this surrogate.")
+        torch.save({'model_state_dict' : self.model.state_dict(),
+            'likelihood_state_dict' : self.likelihood.state_dict()},
+            filepath)
 
     def load(self, filepath: str):
         """
-        Optionally load a saved model.
+        Load a saved model.
         """
-        raise NotImplementedError("Loading not implemented for this surrogate.")
+        checkpoint = torch.load(filepath, weights_only=False)
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+        self.likelihood.load_state_dict(checkpoint['likelihood_state_dict'])
 
 class SingleFidelityGPSurrogate(BaseGPSurrogate):
 
@@ -116,10 +121,6 @@ class SingleFidelityGPSurrogate(BaseGPSurrogate):
             std = np.sqrt(var)
         mean, std = state.inverse_transform_Y(mean, std)
         return {'mean' : mean, 'std' : std}
-
-    def eval(self):
-        self.model.eval()
-        self.likelihood.eval()
 
 class MultiObjectiveSingleFidelityGPSurrogate(BaseGPSurrogate):
     """
@@ -182,7 +183,7 @@ class MultiObjectiveSingleFidelityGPSurrogate(BaseGPSurrogate):
             predictions[ikey] = {'mean' : mean, 'std' : std}
 
         return predictions
-class MultiFidelityGPSurrogate:
+class MultiFidelityGPSurrogate(BaseGPSurrogate):
 
     def __init__(self):
         self.model = None
@@ -219,7 +220,3 @@ class MultiFidelityGPSurrogate:
             std = np.sqrt(var)
         mean, std = state.inverse_transform_Y(mean, std)
         return {fid : {'mean' : mean[:,fid], 'std' : std[:,fid]} for fid in range(state.fidelity_domain.num_fidelities)}
-
-    def eval(self):
-        self.model.eval()
-        self.likelihood.eval()
