@@ -5,6 +5,7 @@ Defines the optimiser state
 import torch
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(device)
 dtype = torch.double
 
 from .domain import InputDomain,FidelityDomain
