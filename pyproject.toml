@@ -9,6 +9,7 @@ license = "MIT"
 license-files = ["LICENSE*"]
 dependencies = [
     "botorch",
+    "h5py",
     "numpy",
     "scipy",
     "scikit-learn",
