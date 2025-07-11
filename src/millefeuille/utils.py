@@ -1,23 +1,16 @@
+import numpy as np
+from scipy.stats import norm
+
+from .optimise import *
+from .simulator import *
+
 """
 Defines some useful utility functions which do not fit into the defined classes
 """
-import numpy as np
 
-from .simulator import *
-from .optimise import *
-
-from scipy.stats import norm
-import numpy as np
 
 def probabilistic_threshold_sampling(
-    domain,
-    state,
-    sampler,
-    surrogate,
-    initial_samples,
-    threshold_value,
-    target_key=None,
-    random_draws=None
+    domain, state, sampler, surrogate, initial_samples, threshold_value, target_key=None, random_draws=None
 ):
     """
     Samples points using a GP surrogate and filters them probabilistically
@@ -47,15 +40,15 @@ def probabilistic_threshold_sampling(
     # Predict mean and std from GP
     predictions = surrogate.predict(state, x_all)
 
-    if(target_key is not None):
+    if target_key is not None:
         prediction = predictions[target_key]
     else:
-        if('mean' not in predictions.keys()):
+        if "mean" not in predictions.keys():
             prediction = predictions[predictions.keys()[0]]
         else:
             prediction = predictions
 
-    mean, std = prediction['mean'], prediction['std']
+    mean, std = prediction["mean"], prediction["std"]
 
     # Compute probability P(y > threshold)
     mean = mean.flatten()
@@ -71,14 +64,10 @@ def probabilistic_threshold_sampling(
 
     return x_all, y_pred, prob, mask
 
+
 def surrogate_threshold_sampling(
-        domain,
-        state,
-        sampler,
-        surrogate,
-        initial_samples,
-        surrogate_threshold,
-        target_key=None):
+    domain, state, sampler, surrogate, initial_samples, surrogate_threshold, target_key=None
+):
     """
     Draws samples from the sampler, evaluates the surrogate model,
     and selects those above a specified threshold.
@@ -104,66 +93,78 @@ def surrogate_threshold_sampling(
     # Predict mean and std from GP
     predictions = surrogate.predict(state, x_all)
 
-    if(target_key is not None):
+    if target_key is not None:
         prediction = predictions[target_key]
     else:
-        if('mean' not in predictions.keys()):
+        if "mean" not in predictions.keys():
             prediction = predictions[predictions.keys()[0]]
         else:
             prediction = predictions
 
-    mean, std = prediction['mean'], prediction['std']
+    mean = prediction["mean"]
 
     y_pred = mean
     mask = mean > surrogate_threshold
 
     return x_all, y_pred, mask
 
-def singlefidelity_BO_run(Nsamples,batch_size,acq_function,state,surrogate,simulator,scheduler=None,csv_name=None,verbose=False):
-    if(isinstance(simulator,ExectuableSimulator) and scheduler is None):
-        print('If simulator is an ExecutableSimulator, you must provide a scheduler')
+
+def singlefidelity_BO_run(
+    Nsamples, batch_size, acq_function, state, surrogate, simulator, scheduler=None, csv_name=None, verbose=False
+):
+    if isinstance(simulator, ExectuableSimulator) and scheduler is None:
+        print("If simulator is an ExecutableSimulator, you must provide a scheduler")
         raise Exception
 
     for _ in range(Nsamples):
-        X_next = suggest_next_locations(batch_size,state,surrogate,
-        acq_function=acq_function,
-        verbose=verbose)
+        X_next = suggest_next_locations(batch_size, state, surrogate, acq_function=acq_function, verbose=verbose)
 
         index_next = state.index[-1] + np.arange(batch_size) + 1
-        if(isinstance(simulator,ExectuableSimulator)):
+        if isinstance(simulator, ExectuableSimulator):
             P_next, Y_next = simulator(index_next, X_next, scheduler)
-        elif(isinstance(simulator,PythonSimulator)):
+        elif isinstance(simulator, PythonSimulator):
             P_next, Y_next = simulator(index_next, X_next)
         else:
-            print('simulator class not recognised, inherit for mille-feuille Simulator classes...')
+            print("simulator class not recognised, inherit for mille-feuille Simulator classes...")
 
-        state.update(index_next,X_next=X_next,Y_next=Y_next,P_next=P_next)
-        if(csv_name is not None):
+        state.update(index_next, X_next=X_next, Y_next=Y_next, P_next=P_next)
+        if csv_name is not None:
             state.to_csv(csv_name)
 
     return state
 
-def multifidelity_BO_run(Nsamples,batch_size,acq_function,cost_model,state,surrogate,simulator,scheduler=None,csv_name=None,verbose=False):
-    if(isinstance(simulator,ExectuableSimulator) and scheduler is None):
-        print('If simulator is an ExecutableSimulator, you must provide a scheduler')
+
+def multifidelity_BO_run(
+    Nsamples,
+    batch_size,
+    acq_function,
+    cost_model,
+    state,
+    surrogate,
+    simulator,
+    scheduler=None,
+    csv_name=None,
+    verbose=False,
+):
+    if isinstance(simulator, ExectuableSimulator) and scheduler is None:
+        print("If simulator is an ExecutableSimulator, you must provide a scheduler")
         raise Exception
 
     for _ in range(Nsamples):
-        X_next,S_next = suggest_next_locations(batch_size,state,surrogate,
-        acq_function=acq_function,
-        cost_model=cost_model,
-        verbose=verbose)
+        X_next, S_next = suggest_next_locations(
+            batch_size, state, surrogate, acq_function=acq_function, cost_model=cost_model, verbose=verbose
+        )
 
         index_next = state.index[-1] + np.arange(batch_size) + 1
-        if(isinstance(simulator,ExectuableSimulator)):
-            P_next, Y_next = simulator(index_next, X_next, scheduler, Ss = S_next)
-        elif(isinstance(simulator,PythonSimulator)):
-            P_next, Y_next = simulator(index_next, X_next, Ss = S_next)
+        if isinstance(simulator, ExectuableSimulator):
+            P_next, Y_next = simulator(index_next, X_next, scheduler, Ss=S_next)
+        elif isinstance(simulator, PythonSimulator):
+            P_next, Y_next = simulator(index_next, X_next, Ss=S_next)
         else:
-            print('simulator class not recognised, inherit for mille-feuille Simulator classes...')
+            print("simulator class not recognised, inherit for mille-feuille Simulator classes...")
 
-        state.update(index_next,X_next=X_next,Y_next=Y_next,P_next=P_next,S_next=S_next)
-        if(csv_name is not None):
+        state.update(index_next, X_next=X_next, Y_next=Y_next, P_next=P_next, S_next=S_next)
+        if csv_name is not None:
             state.to_csv(csv_name)
 
     return state

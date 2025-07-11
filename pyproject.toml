@@ -1,0 +1,54 @@
+[project]
+name = "millefeuille"
+description = "Multi Fidelity Bayesian Optimisation wrapper for HPC scale simulations"
+readme = "README.md"
+authors = [
+    {name = "Aidan Crilly @ Imperial College London", email="a.crilly16@imperial.ac.uk"},
+]
+license = "MIT"
+license-files = ["LICENSE*"]
+dependencies = [
+    "botorch",
+    "numpy",
+    "scipy",
+    "scikit-learn",
+]
+requires-python = ">=3.11"
+dynamic = ["version"]
+
+[project.optional-dependencies]
+dev = [
+    "pre-commit",
+    "pytest",
+    "pytest-regressions",
+    "pytest-cases",
+]
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.pytest.ini_options]
+# Test type hints w/ typeguard - currently disabled
+addopts = "--import-mode=importlib --strict-markers"
+pythonpath = "."
+testpaths = ["tests"]
+filterwarnings = [
+    "error",
+    # ignored by default
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+    "ignore::ImportWarning",
+    # raised by Cython, usually harmless
+    "ignore:numpy.dtype size changed",
+    "ignore:numpy.ufunc size changed",
+    # sometimes, dependencies leak resources
+    "ignore:.*socket\\.socket.*:pytest.PytestUnraisableExceptionWarning",
+]
+markers = [
+    "regression: mark test as a regression test",
+    "unit: mark test as a unit test"
+]

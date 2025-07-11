@@ -1,0 +1,44 @@
+name: Run tests
+
+# Controls when the action will run.
+on:
+  pull_request:
+
+  push:
+    branches:
+      - main
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+# Cancel in-progress tests on new commits to the same branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+
+  unit-tests:
+    strategy:
+      matrix:
+        runner: [ubuntu-latest] # disable until nvidia tools available, gpu_runner]
+
+        python-version: ["3.11"]
+
+        include:
+          - runner: ubuntu-latest
+
+    runs-on: ${{ matrix.runner }}
+    steps:
+    - name: Checkout Git repository
+      uses: actions/checkout@v4
+
+    - name: Set up and install lagradept + dependencies
+      uses: ./.github/actions/setup_repo
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Run unit tests
+      run: |
+        pytest -m "unit" tests/

@@ -1,0 +1,22 @@
+name: Setup repo
+description: "Checkout, and install mille-feuille with dev requirements"
+
+inputs:
+  python-version:
+    description: "Version range or exact version of Python or PyPy to use"
+    required: true
+    type: string
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install dependencies (cpu)
+      run: |
+        pip install --upgrade pip
+        pip install .[dev]
+      shell: bash

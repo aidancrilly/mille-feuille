@@ -1,11 +1,12 @@
+import torch
+from botorch.acquisition.cost_aware import InverseCostWeightedUtility
+from botorch.models.deterministic import DeterministicModel
+from torch import Tensor
+
 """
 Defines number of cost functions beyond the standards in BOtorch
 """
 
-import torch
-from botorch.models.deterministic import DeterministicModel
-from botorch.acquisition.cost_aware import InverseCostWeightedUtility
-from torch import Tensor
 
 class WeightedFidelityCostModel(DeterministicModel):
     r"""Deterministic, cost model operating on fidelity parameters.
@@ -50,11 +51,12 @@ class WeightedFidelityCostModel(DeterministicModel):
         Returns:
             A `batch_shape x q x 1`-dim tensor of costs.
         """
-        lin_cost = self.weights[X[...,-1].int()]
+        lin_cost = self.weights[X[..., -1].int()]
 
         return self.fixed_cost + lin_cost.unsqueeze(-1)
 
-def generate_multifidelity_cost_model(costs,fixed_cost=0.25):
+
+def generate_multifidelity_cost_model(costs, fixed_cost=0.25):
     cost_model = WeightedFidelityCostModel(fidelity_weights=costs, fixed_cost=fixed_cost)
     cost_aware_utility = InverseCostWeightedUtility(cost_model=cost_model)
     return cost_aware_utility
