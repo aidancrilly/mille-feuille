@@ -34,7 +34,7 @@ jobs:
     - name: Checkout Git repository
       uses: actions/checkout@v4
 
-    - name: Set up and install lagradept + dependencies
+    - name: Set up and install millefeuille + dependencies
       uses: ./.github/actions/setup_repo
       with:
         python-version: ${{ matrix.python-version }}
