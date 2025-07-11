@@ -1,5 +1,6 @@
 import time
 
+from botorch.acquisition import qLogExpectedImprovement
 from botorch.optim import optimize_acqf_mixed
 
 from .acquisition import *
