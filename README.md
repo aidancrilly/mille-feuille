@@ -21,7 +21,7 @@ Or clone repo and install dev environment:
 ```bash
 git clone https://github.com/aidancrilly/mille-feuille.git
 cd mille-feuille
-pip install .[dev]
+pip install -e .[dev]
 ```
 
 Requires **Python ≥ 3.11**. Core dependencies (`botorch`, `gpytorch`, `numpy`, `scipy`, `h5py`, `scikit‑learn` …) are pulled in automatically.
@@ -32,7 +32,11 @@ Requires **Python ≥ 3.11**. Core dependencies (`botorch`, `gpytorch`, `nump
 
 ```python
 import numpy as np
+
 from scipy.stats.qmc import LatinHypercube
+
+from botorch.acquisition import qUpperConfidenceBound
+
 from millefeuille.domain import InputDomain
 from millefeuille.state import State
 from millefeuille.surrogate import SingleFidelityGPSurrogate
@@ -47,13 +51,20 @@ domain = InputDomain(
     steps=np.array([0.0, 0.0])   # both dims continuous
 )
 
+# Function to be maximised
+def f_optim(x):
+    return -np.vecdot(x,x,axis=1)
+
+# 2. Create initial training data -------------------------------------------
+
 # Initial random sampling
 nsims = 10
 sampler = LatinHypercube(domain.dim)
 index = np.arange(nsims,dtype=int)
-Xs = generate_initial_sample(domain,sampler,nsims)
-Ys = -np.vecdot(Xs,Xs,axis=1)
+Xs, _ = generate_initial_sample(domain,sampler,nsims)
+Ys = f_optim(Xs)
 
+# 3. Set up mille-feuille state & surrogate ---------------------------------
 # Package into millefeuille State
 state = State(
 	input_domain=domain,
@@ -62,12 +73,19 @@ state = State(
 	Ys=Ys
 )
 
-# 2. Optimiser call ---------------------------------------------------------
+# Create surrogate model based on state
+surrogate = SingleFidelityGPSurrogate()
+surrogate.init(state)
+
+# 4. Optimiser call ---------------------------------------------------------
+# Use botorch acquistion functions
+acq_function = qUpperConfidenceBound(surrogate.model,beta=0.5)
+
 X_next = suggest_next_locations(
     batch_size=2,
     state=state,
-    surrogate=SingleFidelityGPSurrogate(),
-    acq_function="qLogExpectedImprovement"
+    surrogate=surrogate,
+    acq_function=acq_function
 )
 print(X_next)    # candidate points in original scale
 ```
