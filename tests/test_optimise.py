@@ -6,7 +6,7 @@ from millefeuille.optimise import suggest_next_locations
 from millefeuille.state import State
 from millefeuille.surrogate import SingleFidelityGPSurrogate
 
-from .conftest import ForresterDomain, ForresterFunction, sampler
+from .conftest import ForresterDomain, PythonForresterFunction, sampler
 
 
 @pytest_cases.fixture(params=[5])
@@ -31,7 +31,7 @@ def generate_acq_function(request):
 def singlefidelitysample(ntrain):
     Is = np.arange(ntrain)
     Xs, _ = generate_initial_sample(ForresterDomain, sampler, ntrain)
-    f = ForresterFunction()
+    f = PythonForresterFunction()
     Ys = f(Is, Xs)
     return Is, Xs, Ys
 

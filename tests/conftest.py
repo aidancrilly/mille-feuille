@@ -1,11 +1,17 @@
+from typing import Sequence
+
 import numpy as np
+import numpy.typing as npt
 from millefeuille.domain import InputDomain
-from millefeuille.simulator import PythonSimulator
+from millefeuille.simulator import ExectuableSimulator, PythonSimulator, Scheduler
 
 sampler = np.random.default_rng(seed=12345)
 
 
-class ForresterFunction(PythonSimulator):
+ForresterDomain = InputDomain(dim=1, b_low=np.array([0.0]), b_up=np.array([1.0]), steps=np.array([0.0]))
+
+
+class PythonForresterFunction(PythonSimulator):
     """
     Multi-fidelity Forrestor function (negated for maximisation)
 
@@ -31,4 +37,44 @@ class ForresterFunction(PythonSimulator):
         return -(A * self.f(Xs) + B * (Xs - 0.5) + C)
 
 
-ForresterDomain = InputDomain(dim=1, b_low=np.array([0.0]), b_up=np.array([1.0]), steps=np.array([0.0]))
+class ExecutableForrestorSimulator(ExectuableSimulator):
+    @property
+    def executable(self) -> str:
+        return "a.out"
+
+    @property
+    def nproc_per_fidelity(self) -> list[int]:
+        return [1, 1]
+
+    def single_prepare_inputs(self, index: int, x: npt.NDArray, s: int | None):
+        pass
+
+    def launch(self, indices: npt.NDArray, Xs: npt.NDArray, scheduler: type[Scheduler], Ss: None | npt.NDArray = None):
+        pass
+
+    def single_postprocess(self, index: int, x: npt.NDArray, s: int | None) -> tuple[npt.NDArray | None, npt.NDArray]:
+        pass
+
+
+class ShellScheduler(Scheduler):
+    def launch_jobs(self, exe: str, nproc: int, inputs: Sequence[str], indices: Sequence[str]):
+        """
+        Launches simulation jobs in parallel.
+
+        Parameters:
+            exe: Path to the MPI-enabled executable
+            nproc: Number of processes per job
+            inputs: List of input file paths
+            indices: List of run indices (for logging/output naming)
+        """
+        pass
+
+    @property
+    def mpiexec(self) -> str:
+        """Path to `mpiexec` or equivalent MPI launch command."""
+        return "mpiexec"
+
+    @property
+    def output_dir(self) -> str:
+        """Directory to store stdout/stderr log files."""
+        return "."
