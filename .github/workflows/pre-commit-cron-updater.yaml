@@ -4,7 +4,7 @@ on:
   workflow_dispatch:  # Allows manual trigger
 
   schedule:
-    - cron:  '0 0 * * 1'  # 12AM only on Mondays
+    - cron:  '0 0 1 * *'  # 12AM only on first of month
 
 jobs:
   auto-update-hooks:
