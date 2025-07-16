@@ -1,6 +1,7 @@
 import os
 
 import numpy as np
+import pytest
 import pytest_cases
 from millefeuille.initialise import generate_initial_sample
 from millefeuille.state import State
@@ -34,6 +35,7 @@ def testXs(ntest):
     return Xs
 
 
+@pytest.mark.unit
 def test_singlefidelity_GP(singlefidelitysample, testXs):
     Is, Xs, Ys = singlefidelitysample
 

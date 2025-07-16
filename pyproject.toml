@@ -23,6 +23,7 @@ dev = [
     "pytest",
     "pytest-regressions",
     "pytest-cases",
+    "f90nml",
 ]
 
 [build-system]

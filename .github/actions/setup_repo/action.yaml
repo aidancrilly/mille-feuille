@@ -7,6 +7,14 @@ inputs:
     required: true
     type: string
 
+  oneapi:
+    description: "Intel OneAPI version to use"
+    required: true
+    type: string
+
+env:
+  CTEST_NO_TESTS_ACTION: error
+
 runs:
   using: "composite"
   steps:
@@ -20,3 +28,38 @@ runs:
         pip install --upgrade pip
         pip install .[dev]
       shell: bash
+
+    - name: cache install oneAPI
+      id: cache-install
+      uses: actions/cache@v4
+      with:
+        path: |
+          /opt/intel/oneapi
+        key: oneapi-${{ inputs.oneapi }}-apt
+
+    - name: non-cache install oneAPI
+      if: steps.cache-install.outputs.cache-hit != 'true'
+      timeout-minutes: 5
+      run: |
+        sh -c .github/workflows/oneapi_setup_apt_repo_linux.sh
+        sudo apt install --no-install-recommends \
+          intel-oneapi-compiler-fortran-${{ inputs.oneapi }} \
+          intel-oneapi-compiler-dpcpp-cpp-${{ inputs.oneapi }} \
+          intel-oneapi-mpi \
+          intel-oneapi-mpi-devel \
+          intel-oneapi-mkl-${{ inputs.oneapi }} \
+          intel-oneapi-mkl-devel-${{ inputs.oneapi }}
+
+    - name: Setup Intel oneAPI environment
+      run: |
+        source /opt/intel/oneapi/setvars.sh
+        printenv >> $GITHUB_ENV
+
+    - name: Compile test executables
+      run: |
+        mpiifort -g -traceback -r8 ./tests/test_exe/fmain.f90 -o ./tests/test_exe/fmain
+        mpiicpx -g -traceback ./tests/test_exe/cxxmain.cpp -o ./tests/test_exe/cxxmain
+
+    - name: exclude unused files from cache
+      if: steps.cache-install.outputs.cache-hit != 'true'
+      run: sh -c .github/workflows/oneapi_cache_exclude_linux.sh

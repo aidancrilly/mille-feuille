@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 import pytest_cases
 from botorch.acquisition import qLogExpectedImprovement, qUpperConfidenceBound
 from millefeuille.initialise import generate_initial_sample
@@ -36,6 +37,7 @@ def singlefidelitysample(ntrain):
     return Is, Xs, Ys
 
 
+@pytest.mark.unit
 def test_optimise_singlefidelity_GP(singlefidelitysample, batch_size, generate_acq_function):
     Is, Xs, Ys = singlefidelitysample
 
