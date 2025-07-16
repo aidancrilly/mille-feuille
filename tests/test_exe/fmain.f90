@@ -2,9 +2,9 @@ program forrester_test
 
     use mpi
     implicit none
-    real :: X, Y
+    real(kind=8) :: X, Y, Yt
     integer :: S
-    real :: A, B, C
+    real(kind=8) :: A, B, C
     integer :: irank, nproc, ierr
     character(len=255) :: fname_in, fname_out
 
@@ -21,7 +21,7 @@ program forrester_test
     if(irank .eq. 0) call readin(fname_in, X, S)
 
     ! Send X and S to all procs
-    call MPI_bcast(X, 1, MPI_REAL, 0, MPI_COMM_WORLD, ierr)
+    call MPI_bcast(X, 1, MPI_REAL8, 0, MPI_COMM_WORLD, ierr)
     call MPI_bcast(S, 1, MPI_INTEGER, 0, MPI_COMM_WORLD, ierr)
 
     call forrester(X,Y)
@@ -31,14 +31,10 @@ program forrester_test
     Y = -(A * Y + B * (X - 0.5) + C)
 
     ! Gather summed info on root
-    if(irank .eq. 0) then
-        call MPI_reduce(MPI_IN_PLACE, Y, 1, MPI_REAL, MPI_SUM, 0, MPI_COMM_WORLD, ierr)
-    else
-        call MPI_reduce(Y, Y, 1, MPI_REAL, MPI_SUM, 0, MPI_COMM_WORLD, ierr)
-    end if
+    call MPI_reduce(Y, Yt, 1, MPI_REAL8, MPI_SUM, 0, MPI_COMM_WORLD, ierr)
 
     ! Average over mpi processors
-    Y = Y / nproc
+    Y = Yt / nproc
 
     if(irank .eq. 0) call writeout(fname_out, Y)
 
