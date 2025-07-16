@@ -26,6 +26,8 @@ jobs:
 
         python-version: ["3.11"]
 
+        oneapi: ["2025.1"]
+
         include:
           - runner: ubuntu-latest
 
@@ -38,6 +40,7 @@ jobs:
       uses: ./.github/actions/setup_repo
       with:
         python-version: ${{ matrix.python-version }}
+        oneapi: ${{ matrix.oneapi }}
 
     - name: Run unit tests
       run: |

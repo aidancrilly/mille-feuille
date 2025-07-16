@@ -1,12 +1,13 @@
 import os
 
 import numpy as np
+import pytest
 import pytest_cases
 from millefeuille.initialise import generate_initial_sample
 from millefeuille.state import State
 from millefeuille.surrogate import SingleFidelityGPSurrogate
 
-from .conftest import ForresterDomain, ForresterFunction, sampler
+from .conftest import ForresterDomain, PythonForresterFunction, sampler
 
 
 @pytest_cases.fixture(params=[5, 10, 25])
@@ -18,7 +19,7 @@ def ntrain(request):
 def singlefidelitysample(ntrain):
     Is = np.arange(ntrain)
     Xs, _ = generate_initial_sample(ForresterDomain, sampler, ntrain)
-    f = ForresterFunction()
+    f = PythonForresterFunction()
     Ys = f(Is, Xs)
     return Is, Xs, Ys
 
@@ -34,6 +35,7 @@ def testXs(ntest):
     return Xs
 
 
+@pytest.mark.unit
 def test_singlefidelity_GP(singlefidelitysample, testXs):
     Is, Xs, Ys = singlefidelitysample
 

@@ -4,4 +4,8 @@ build/
 
 __pycache__/
 
+*.obj
+*.pdb
+*.exe
+
 *.pth

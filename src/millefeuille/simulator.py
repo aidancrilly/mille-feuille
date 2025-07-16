@@ -23,7 +23,7 @@ class Scheduler(ABC):
     """
 
     @abstractmethod
-    def launch_jobs(self, exe: str, nproc: int, inputs: Sequence[str], indices: Sequence[str]):
+    def launch_jobs(self, exe: str, nprocs: Sequence[int], inputs: Sequence, indices: Sequence[str]):
         """
         Launches simulation jobs in parallel.
 
