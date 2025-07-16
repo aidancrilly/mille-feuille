@@ -58,9 +58,10 @@ runs:
       shell: bash
 
     - name: Compile test executables
+      working-directory: ./tests/test_exe
       run: |
-        mpiifx -g -traceback -r8 ./tests/test_exe/fmain.f90 -o ./tests/test_exe/fmain
-        mpiicpx -g -traceback ./tests/test_exe/cxxmain.cpp -o ./tests/test_exe/cxxmain
+        mpiifx -g -traceback -r8 fmain.f90 -o fmain
+        mpiicpx -g -traceback cxxmain.cpp -o cxxmain
       shell: bash
 
     - name: exclude unused files from cache
