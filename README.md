@@ -126,6 +126,10 @@ When you need full flexibility you can always drop down and call BoTorch directl
 
 ---
 
+## Additional Info
+
+CI makes use of [cached IntelOneAPI install by scivision](https://gist.github.com/scivision/b22455e3322826a1c385d5d4b1a8d25e)
+
 ## ✉️ Contact
 
 **Aidan Crilly** · [ac116@ic.ac.uk](mailto\:ac116@ic.ac.uk)
