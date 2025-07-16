@@ -59,7 +59,7 @@ runs:
 
     - name: Compile test executables
       run: |
-        mpiifort -g -traceback -r8 ./tests/test_exe/fmain.f90 -o ./tests/test_exe/fmain
+        mpiifx -g -traceback -r8 ./tests/test_exe/fmain.f90 -o ./tests/test_exe/fmain
         mpiicpx -g -traceback ./tests/test_exe/cxxmain.cpp -o ./tests/test_exe/cxxmain
       shell: bash
 
