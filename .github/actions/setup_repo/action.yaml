@@ -34,18 +34,20 @@ runs:
       shell: bash
 
     - name: non-cache install oneAPI
-      if: ${{ inputs.cached }} != 'true'
       # timeout-minutes: 5
       run: |
-        echo ${{ inputs.cached }}
-        sh -c .github/actions/setup_repo/oneapi_setup_apt_repo_linux.sh
-        sudo apt install --no-install-recommends \
-          intel-oneapi-compiler-fortran-${{ inputs.oneapi }} \
-          intel-oneapi-compiler-dpcpp-cpp-${{ inputs.oneapi }} \
-          intel-oneapi-mpi \
-          intel-oneapi-mpi-devel \
-          intel-oneapi-mkl-${{ inputs.oneapi }} \
-          intel-oneapi-mkl-devel-${{ inputs.oneapi }}
+        if [ "${{ inputs.cached }}" = "true" ]; then
+          echo "Cache hit! No install required"
+        else
+          sh -c .github/actions/setup_repo/oneapi_setup_apt_repo_linux.sh
+          sudo apt install --no-install-recommends \
+            intel-oneapi-compiler-fortran-${{ inputs.oneapi }} \
+            intel-oneapi-compiler-dpcpp-cpp-${{ inputs.oneapi }} \
+            intel-oneapi-mpi \
+            intel-oneapi-mpi-devel \
+            intel-oneapi-mkl-${{ inputs.oneapi }} \
+            intel-oneapi-mkl-devel-${{ inputs.oneapi }}
+        fi
       shell: bash
 
     - name: Setup Intel oneAPI environment
@@ -62,6 +64,10 @@ runs:
       shell: bash
 
     - name: exclude unused files from cache
-      if: ${{ inputs.cached }} != 'true'
-      run: sh -c .github/actions/setup_repo/oneapi_cache_exclude_linux.sh
+      run: |
+        if [ "${{ inputs.cached }}" = "true" ]; then
+          echo "Cache hit! No clean up required"
+        else
+          sh -c .github/actions/setup_repo/oneapi_cache_exclude_linux.sh
+        fi
       shell: bash
