@@ -22,14 +22,9 @@ jobs:
   unit-tests:
     strategy:
       matrix:
-        runner: [ubuntu-latest] # disable until nvidia tools available, gpu_runner]
-
         python-version: ["3.11"]
 
         oneapi: ["2025.1"]
-
-        include:
-          - runner: ubuntu-latest
 
     runs-on: ${{ matrix.runner }}
     steps:
