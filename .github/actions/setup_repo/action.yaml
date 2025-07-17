@@ -37,7 +37,7 @@ runs:
       if: ${{ inputs.cached }} != 'true'
       # timeout-minutes: 5
       run: |
-        echo ${{ inputs.cached }} 
+        echo ${{ inputs.cached }}
         sh -c .github/actions/setup_repo/oneapi_setup_apt_repo_linux.sh
         sudo apt install --no-install-recommends \
           intel-oneapi-compiler-fortran-${{ inputs.oneapi }} \

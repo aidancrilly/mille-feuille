@@ -46,7 +46,7 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
         oneapi: ${{ matrix.oneapi }}
-        cached: steps.cache-install.outputs.cache-hit
+        cached: ${{ steps.cache-install.outputs.cache-hit }}
 
     - name: Run unit tests
       run: |
