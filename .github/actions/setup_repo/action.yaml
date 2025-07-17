@@ -12,6 +12,10 @@ inputs:
     required: true
     type: string
 
+  cached:
+    description: "Does cached install of IntelOneAPI exist?"
+    required: true
+
 env:
   CTEST_NO_TESTS_ACTION: error
 
@@ -29,26 +33,21 @@ runs:
         pip install .[dev]
       shell: bash
 
-    - name: cache install oneAPI
-      id: cache-install
-      uses: actions/cache@v4
-      with:
-        path: |
-          /opt/intel/oneapi
-        key: oneapi-${{ inputs.oneapi }}-apt
-
     - name: non-cache install oneAPI
-      if: steps.cache-install.outputs.cache-hit != 'true'
       # timeout-minutes: 5
       run: |
-        sh -c .github/actions/setup_repo/oneapi_setup_apt_repo_linux.sh
-        sudo apt install --no-install-recommends \
-          intel-oneapi-compiler-fortran-${{ inputs.oneapi }} \
-          intel-oneapi-compiler-dpcpp-cpp-${{ inputs.oneapi }} \
-          intel-oneapi-mpi \
-          intel-oneapi-mpi-devel \
-          intel-oneapi-mkl-${{ inputs.oneapi }} \
-          intel-oneapi-mkl-devel-${{ inputs.oneapi }}
+        if [ "${{ inputs.cached }}" = "true" ]; then
+          echo "Cache hit! No install required"
+        else
+          sh -c .github/actions/setup_repo/oneapi_setup_apt_repo_linux.sh
+          sudo apt install --no-install-recommends \
+            intel-oneapi-compiler-fortran-${{ inputs.oneapi }} \
+            intel-oneapi-compiler-dpcpp-cpp-${{ inputs.oneapi }} \
+            intel-oneapi-mpi \
+            intel-oneapi-mpi-devel \
+            intel-oneapi-mkl-${{ inputs.oneapi }} \
+            intel-oneapi-mkl-devel-${{ inputs.oneapi }}
+        fi
       shell: bash
 
     - name: Setup Intel oneAPI environment
@@ -65,6 +64,10 @@ runs:
       shell: bash
 
     - name: exclude unused files from cache
-      if: steps.cache-install.outputs.cache-hit != 'true'
-      run: sh -c .github/actions/setup_repo/oneapi_cache_exclude_linux.sh
+      run: |
+        if [ "${{ inputs.cached }}" = "true" ]; then
+          echo "Cache hit! No clean up required"
+        else
+          sh -c .github/actions/setup_repo/oneapi_cache_exclude_linux.sh
+        fi
       shell: bash

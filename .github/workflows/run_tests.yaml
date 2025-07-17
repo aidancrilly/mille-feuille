@@ -22,25 +22,31 @@ jobs:
   unit-tests:
     strategy:
       matrix:
-        runner: [ubuntu-latest] # disable until nvidia tools available, gpu_runner]
+        runner: ['ubuntu-latest']
 
         python-version: ["3.11"]
 
         oneapi: ["2025.1"]
-
-        include:
-          - runner: ubuntu-latest
 
     runs-on: ${{ matrix.runner }}
     steps:
     - name: Checkout Git repository
       uses: actions/checkout@v4
 
+    - name: cache install oneAPI
+      id: cache-install
+      uses: actions/cache@v4
+      with:
+        path: |
+          /opt/intel/oneapi
+        key: oneapi-${{ matrix.oneapi }}-apt
+
     - name: Set up and install millefeuille + dependencies
       uses: ./.github/actions/setup_repo
       with:
         python-version: ${{ matrix.python-version }}
         oneapi: ${{ matrix.oneapi }}
+        cached: ${{ steps.cache-install.outputs.cache-hit }}
 
     - name: Run unit tests
       run: |
