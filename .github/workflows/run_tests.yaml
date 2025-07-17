@@ -22,6 +22,8 @@ jobs:
   unit-tests:
     strategy:
       matrix:
+        runner: ['ubuntu-latest']
+
         python-version: ["3.11"]
 
         oneapi: ["2025.1"]
