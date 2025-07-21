@@ -9,3 +9,5 @@ __pycache__/
 *.exe
 
 *.pth
+
+tests/test_exe/nlohmann

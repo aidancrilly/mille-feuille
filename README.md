@@ -21,6 +21,7 @@ Or clone repo and install dev environment:
 git clone https://github.com/aidancrilly/mille-feuille.git
 cd mille-feuille
 pip install -e .[dev]
+python dev_fetch_deps.py # Grabs header file needed by C++ test script
 ```
 
 Requires **Python ≥ 3.11**. Core dependencies (`botorch`, `gpytorch`, `numpy`, `scipy`, `h5py`, `scikit‑learn` …) are pulled in automatically.

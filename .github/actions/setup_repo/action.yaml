@@ -31,6 +31,7 @@ runs:
       run: |
         pip install --upgrade pip
         pip install .[dev]
+        python dev_fetch_deps.py
       shell: bash
 
     - name: non-cache install oneAPI
