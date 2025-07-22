@@ -9,6 +9,7 @@ from gpytorch.constraints import Interval
 from gpytorch.kernels import MaternKernel, ScaleKernel
 from gpytorch.likelihoods import GaussianLikelihood
 from gpytorch.mlls import ExactMarginalLogLikelihood
+from gpytorch.module import Module
 
 from .kernel import ModifiedSingleTaskMultiFidelityGP
 from .state import State
@@ -99,6 +100,7 @@ class BaseGPSurrogate(ABC):
 class SingleFidelityGPSurrogate(BaseGPSurrogate):
     def __init__(self):
         self.model = None
+        self.mean_module = None
         self.likelihood = None
         self.state_dicts = None
 
@@ -111,6 +113,7 @@ class SingleFidelityGPSurrogate(BaseGPSurrogate):
     def init(
         self,
         state: State,
+        mean_module: Module | None = None,
         noise_interval=DEFAULT_NOISE_INTERVAL,
         lengthscale_interval=DEFAULT_LENGTHSCALE_INTERVAL,
         **kwargs,
@@ -121,7 +124,10 @@ class SingleFidelityGPSurrogate(BaseGPSurrogate):
         covar_module = ScaleKernel(
             MaternKernel(nu=2.5, ard_num_dims=state.dim, lengthscale_constraint=Interval(*lengthscale_interval))
         )
-        self.model = SingleTaskGP(X_torch, Y_torch, covar_module=covar_module, likelihood=self.likelihood)
+        self.mean_module = mean_module
+        self.model = SingleTaskGP(
+            X_torch, Y_torch, mean_module=self.mean_module, covar_module=covar_module, likelihood=self.likelihood
+        )
 
         if self.state_dicts is None:
             self.state_dicts = {
@@ -133,7 +139,7 @@ class SingleFidelityGPSurrogate(BaseGPSurrogate):
             self.likelihood.load_state_dict(self.state_dicts["likelihood_state_dict"])
 
     def fit(self, state: State, approx_mll=False, **kwargs):
-        self.init(state)
+        self.init(state, self.mean_module)
 
         mll = ExactMarginalLogLikelihood(self.model.likelihood, self.model)
 
