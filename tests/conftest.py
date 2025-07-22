@@ -6,10 +6,12 @@ from typing import Sequence
 import f90nml
 import numpy as np
 import numpy.typing as npt
+import torch
+from gpytorch.means import Mean
 from millefeuille.domain import InputDomain
 from millefeuille.simulator import ExectuableSimulator, PythonSimulator, Scheduler
 
-sampler = np.random.default_rng(seed=12345)
+sampler = np.random.default_rng(seed=123456)
 
 
 ForresterDomain = InputDomain(dim=1, b_low=np.array([0.0]), b_up=np.array([1.0]), steps=np.array([0.0]))
@@ -39,6 +41,36 @@ class PythonForresterFunction(PythonSimulator):
     def __call__(self, indices, Xs, Ss=None):
         A, B, C = self.ABC_values(Ss)
         return -(A * self.f(Xs) + B * (Xs - 0.5) + C)
+
+
+class LowFidelityForresterMean(Mean):
+    """
+
+    A mean function that returns the low fidelity estimator of the Forrestor
+
+    """
+
+    def f(self, Xs):
+        ys = (6 * Xs - 2) ** 2 * torch.sin(12 * Xs + 4)
+        return ys
+
+    def ABC_values(self, Ss):
+        if Ss is not None:
+            A = 1.0 - (1 - Ss) * 0.5
+            B = (1 - Ss) * 10.0
+            C = (1 - Ss) * 5.0
+        else:
+            A = 1.0
+            B = 0.0
+            C = 0.0
+        return A, B, C
+
+    def get_low_fid_ABC(self):
+        return self.ABC_values(0.0)
+
+    def forward(self, Xs):
+        A, B, C = self.get_low_fid_ABC()
+        return -(A * self.f(Xs) + B * (Xs - 0.5) + C).squeeze(-1)
 
 
 class ShellScheduler(Scheduler):

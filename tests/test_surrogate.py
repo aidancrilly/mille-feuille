@@ -7,7 +7,7 @@ from millefeuille.initialise import generate_initial_sample
 from millefeuille.state import State
 from millefeuille.surrogate import SingleFidelityGPSurrogate
 
-from .conftest import ForresterDomain, PythonForresterFunction, sampler
+from .conftest import ForresterDomain, LowFidelityForresterMean, PythonForresterFunction, sampler
 
 
 @pytest_cases.fixture(params=[5, 10, 25])
@@ -36,6 +36,7 @@ def testXs(ntest):
 
 
 @pytest.mark.unit
+# @pytest.mark.filterwarnings('ignore::OptimizationWarning')
 def test_singlefidelity_GP(singlefidelitysample, testXs):
     Is, Xs, Ys = singlefidelitysample
 
@@ -50,6 +51,39 @@ def test_singlefidelity_GP(singlefidelitysample, testXs):
 
     second_surrogate = SingleFidelityGPSurrogate()
     second_surrogate.init(state)
+    second_surrogate.load("test.pth", eval=True)
+    os.remove("test.pth")
+    second_testYs = second_surrogate.predict(state, testXs)
+
+    assert np.isclose(testYs["mean"], second_testYs["mean"]).all(), (
+        "Mean predictions diverged between saved and loaded surrogate model"
+    )
+    assert np.isclose(testYs["std"], second_testYs["std"]).all(), (
+        "Std. dev. predictions diverged between saved and loaded surrogate model"
+    )
+
+
+@pytest.mark.unit
+def test_singlefidelity_mean_module_GP(singlefidelitysample, testXs):
+    Is, Xs, Ys = singlefidelitysample
+
+    state = State(ForresterDomain, Is, Xs, Ys)
+
+    mean_surrogate = SingleFidelityGPSurrogate()
+    mean_surrogate.init(state, mean_module=LowFidelityForresterMean())
+    mean_surrogate.fit(state)
+    testYs = mean_surrogate.predict(state, testXs)
+
+    mean_surrogate.save("test.pth")
+
+    error_surrogate = SingleFidelityGPSurrogate()
+    error_surrogate.init(state)
+    # Check error is raised when don't use mean module
+    with pytest.raises(Exception) as _:  # noqa
+        error_surrogate.load("test.pth", eval=True)
+
+    second_surrogate = SingleFidelityGPSurrogate()
+    second_surrogate.init(state, mean_module=LowFidelityForresterMean())
     second_surrogate.load("test.pth", eval=True)
     os.remove("test.pth")
     second_testYs = second_surrogate.predict(state, testXs)
