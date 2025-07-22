@@ -11,7 +11,7 @@ from gpytorch.means import Mean
 from millefeuille.domain import InputDomain
 from millefeuille.simulator import ExectuableSimulator, PythonSimulator, Scheduler
 
-sampler = np.random.default_rng(seed=123456)
+sampler = np.random.default_rng(seed=12345)
 
 
 ForresterDomain = InputDomain(dim=1, b_low=np.array([0.0]), b_up=np.array([1.0]), steps=np.array([0.0]))

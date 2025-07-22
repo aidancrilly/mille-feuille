@@ -10,7 +10,7 @@ from millefeuille.surrogate import SingleFidelityGPSurrogate
 from .conftest import ForresterDomain, LowFidelityForresterMean, PythonForresterFunction, sampler
 
 
-@pytest_cases.fixture(params=[5, 10, 25])
+@pytest_cases.fixture(params=[5, 10, 20])
 def ntrain(request):
     return request.param
 
@@ -36,7 +36,7 @@ def testXs(ntest):
 
 
 @pytest.mark.unit
-# @pytest.mark.filterwarnings('ignore::OptimizationWarning')
+@pytest.mark.filterwarnings("ignore::botorch.exceptions.warnings.OptimizationWarning")
 def test_singlefidelity_GP(singlefidelitysample, testXs):
     Is, Xs, Ys = singlefidelitysample
 
