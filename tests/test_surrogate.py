@@ -39,6 +39,7 @@ def testXs(ntest):
 
 
 @pytest.mark.unit
+@pytest.mark.filterwarnings("ignore::botorch.exceptions.warnings.OptimizationWarning")
 def test_singlefidelity_GP(singlefidelitysample, testXs):
     warnings.filterwarnings("ignore", category=OptimizationWarning)
     Is, Xs, Ys = singlefidelitysample
