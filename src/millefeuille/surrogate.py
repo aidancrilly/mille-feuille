@@ -94,15 +94,6 @@ class BaseGPSurrogate(ABC):
         self.model.eval()
         self.likelihood.eval()
 
-    def freeze_params(self, mll):
-        """
-        Freeze parameters
-        This is useful for transfer learning or reusing pre-trained models.
-        """
-        for param_name, param in mll.named_parameters():
-            if "frozen" in param_name:
-                param.requires_grad = False
-
     def save(self, filepath: str):
         """
         Save trained model to disk.
@@ -159,8 +150,6 @@ class SingleFidelityGPSurrogate(BaseGPSurrogate):
 
         mll = ExactMarginalLogLikelihood(self.model.likelihood, self.model)
 
-        self.freeze_params(mll)
-
         # Fit the model
         fit_gpytorch_mll(mll, approx_mll=approx_mll)
 
@@ -192,8 +181,6 @@ class MultiFidelityGPSurrogate(BaseGPSurrogate):
         self.init(state, **kwargs)
 
         mll = ExactMarginalLogLikelihood(self.model.likelihood, self.model)
-
-        self.freeze_params(mll)
 
         # Fit the model
         fit_gpytorch_mll(mll, approx_mll=approx_mll)
