@@ -12,7 +12,6 @@ dependencies = [
     "h5py",
     "numpy",
     "scipy",
-    "scikit-learn",
 ]
 requires-python = ">=3.11"
 dynamic = ["version"]

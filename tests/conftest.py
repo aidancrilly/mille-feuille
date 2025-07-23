@@ -50,6 +50,11 @@ class LowFidelityForresterMean(Mean):
 
     """
 
+    def __init__(self, output_transform=None):
+        super().__init__()
+        self.output_transform = output_transform
+        self.register_parameter(name="raw_constant", parameter=torch.nn.Parameter(torch.zeros(1)))
+
     def f(self, Xs):
         ys = (6 * Xs - 2) ** 2 * torch.sin(12 * Xs + 4)
         return ys
@@ -70,7 +75,9 @@ class LowFidelityForresterMean(Mean):
 
     def forward(self, Xs):
         A, B, C = self.get_low_fid_ABC()
-        return -(A * self.f(Xs) + B * (Xs - 0.5) + C).squeeze(-1)
+        Y = -(A * self.f(Xs) + B * (Xs - 0.5) + C) + self.raw_constant
+        Y = self.output_transform.transform(Y).squeeze(-1) if self.output_transform is not None else Y.squeeze(-1)
+        return Y
 
 
 class ShellScheduler(Scheduler):
