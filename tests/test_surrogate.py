@@ -1,8 +1,10 @@
 import os
+import warnings
 
 import numpy as np
 import pytest
 import pytest_cases
+from botorch.exceptions.warnings import OptimizationWarning
 from millefeuille.initialise import generate_initial_sample
 from millefeuille.state import State
 from millefeuille.surrogate import SingleFidelityGPSurrogate
@@ -36,8 +38,8 @@ def testXs(ntest):
 
 
 @pytest.mark.unit
-@pytest.mark.filterwarnings("ignore::botorch.exceptions.warnings.OptimizationWarning")
 def test_singlefidelity_GP(singlefidelitysample, testXs):
+    warnings.filterwarnings("ignore", category=OptimizationWarning)
     Is, Xs, Ys = singlefidelitysample
 
     state = State(ForresterDomain, Is, Xs, Ys)
@@ -65,12 +67,13 @@ def test_singlefidelity_GP(singlefidelitysample, testXs):
 
 @pytest.mark.unit
 def test_singlefidelity_mean_module_GP(singlefidelitysample, testXs):
+    warnings.filterwarnings("ignore", category=OptimizationWarning)
     Is, Xs, Ys = singlefidelitysample
 
     state = State(ForresterDomain, Is, Xs, Ys)
 
     mean_surrogate = SingleFidelityGPSurrogate()
-    mean_surrogate.init(state, mean_module=LowFidelityForresterMean())
+    mean_surrogate.init(state, mean_module=LowFidelityForresterMean(state.Y_scaler))
     mean_surrogate.fit(state)
     testYs = mean_surrogate.predict(state, testXs)
 
@@ -83,7 +86,7 @@ def test_singlefidelity_mean_module_GP(singlefidelitysample, testXs):
         error_surrogate.load("test.pth", eval=True)
 
     second_surrogate = SingleFidelityGPSurrogate()
-    second_surrogate.init(state, mean_module=LowFidelityForresterMean())
+    second_surrogate.init(state, mean_module=LowFidelityForresterMean(state.Y_scaler))
     second_surrogate.load("test.pth", eval=True)
     os.remove("test.pth")
     second_testYs = second_surrogate.predict(state, testXs)

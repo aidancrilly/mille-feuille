@@ -6,7 +6,7 @@ import h5py
 import numpy as np
 import numpy.typing as npt
 import torch
-from sklearn.preprocessing import StandardScaler
+from botorch.models.transforms.outcome import Standardize
 
 from .domain import FidelityDomain, InputDomain
 
@@ -58,6 +58,44 @@ def remove_nan_rows(arrays):
     # Remove rows at indices with NaNs from each non-None array
     cleaned_arrays = [arr[~nan_mask] if arr is not None else None for arr in arrays]
     return cleaned_arrays
+
+
+class StandardScaler(Standardize):
+    def __init__(self, m=1):
+        super().__init__(m=m)
+
+    def fit(self, Y):
+        Y_torch = torch.tensor(Y, dtype=dtype, device=device)
+        self.train()
+        _ = self.forward(Y_torch)
+        self.eval()
+
+    def _tensor_check(self, Y):
+        if torch.is_tensor(Y):
+            return Y
+        else:
+            return torch.tensor(Y, dtype=dtype, device=device)
+
+    def transform(self, Y, return_torch=True):
+        Y_torch = self._tensor_check(Y)
+
+        if return_torch:
+            # Get the transformed values without transformed noise
+            return self.forward(Y_torch)[0]
+        else:
+            # Get the transformed values without transformed noise
+            Y_torch = self.forward(Y_torch)[0]
+            return Y_torch.detach().cpu().numpy()
+
+    def inverse_transform(self, Y, Yvar, return_torch=True):
+        Y_torch = self._tensor_check(Y)
+        Yvar_torch = self._tensor_check(Yvar)
+
+        if return_torch:
+            return self.untransform(Y_torch, Yvar_torch)
+        else:
+            Y_torch, Yvar_torch = self.untransform(Y_torch, Yvar_torch)
+            return Y_torch.detach().cpu().numpy(), Yvar_torch.detach().cpu().numpy()
 
 
 @dataclass
@@ -135,7 +173,7 @@ class State:
         if self.Ys is not None:
             self.Y_scaler.fit(self.Ys)
             self.best_value = self.Ys.max(axis=0)
-            self.best_value_transformed = self.Y_scaler.transform([self.best_value])
+            self.best_value_transformed = self.Y_scaler.transform(self.best_value, return_torch=False)
             self.nsamples = self.Ys.shape[0]
 
     def update(self, index_next, X_next, Y_next, S_next=None, P_next=None, refit_scaler=True):
@@ -146,7 +184,7 @@ class State:
         index_next, X_next, Y_next, P_next, S_next = remove_nan_rows([index_next, X_next, Y_next, P_next, S_next])
 
         self.best_value = max(self.best_value, Y_next.max(axis=0))
-        self.best_value_transformed = self.Y_scaler.transform([self.best_value])
+        self.best_value_transformed = self.Y_scaler.transform(self.best_value, return_torch=False)
 
         self.index = np.append(self.index, index_next, axis=0)
 
@@ -176,12 +214,10 @@ class State:
         if self.l_MultiFidelity:
             Xs_unit = np.c_[Xs_unit, self.Ss]
 
-        # Y transformation, e.g. standardise
-        train_Y = self.Y_scaler.transform(self.Ys)
-
         # Convert to torch tensors
         X_torch = torch.tensor(Xs_unit, dtype=dtype, device=device)
-        Y_torch = torch.tensor(train_Y, dtype=dtype, device=device)
+        # Y transformation, e.g. standardise
+        Y_torch = self.Y_scaler.transform(self.Ys)
 
         return X_torch, Y_torch
 
@@ -211,16 +247,10 @@ class State:
             scaled_Y_stds: np.ndarray, std devs in transformed space (no mean shift)
 
         Returns:
-            Tuple of (unscaled_Ys, unscaled_stds) or unscaled_Ys if stds not provided
+            Tuple of (unscaled_Ys, unscaled_stds)
         """
-        unscaled_Ys = self.Y_scaler.inverse_transform(scaled_Ys)
-
-        if scaled_Y_stds is not None:
-            std_scale = np.sqrt(self.Y_scaler.var_) if hasattr(self.Y_scaler, "var_") else self.Y_scaler.scale_
-            unscaled_stds = scaled_Y_stds * std_scale
-            return unscaled_Ys, unscaled_stds
-
-        return unscaled_Ys
+        unscaled_Ys, unscaled_stds = self.Y_scaler.inverse_transform(scaled_Ys, scaled_Y_stds, return_torch=False)
+        return unscaled_Ys, unscaled_stds
 
     def fidelity_project(self, XSs):
         return self.fidelity_domain.project(XSs)
