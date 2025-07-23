@@ -144,13 +144,18 @@ class SingleFidelityGPSurrogate(BaseGPSurrogate):
         )
         self.mean_module = mean_module
         self.model = SingleTaskGP(
-            X_torch, Y_torch, mean_module=self.mean_module, covar_module=covar_module, likelihood=self.likelihood
+            X_torch,
+            Y_torch,
+            mean_module=self.mean_module,
+            covar_module=covar_module,
+            likelihood=self.likelihood,
+            **kwargs,
         )
 
         self.update_state_dicts()
 
     def fit(self, state: State, approx_mll=False, **kwargs):
-        self.init(state, self.mean_module)
+        self.init(state, self.mean_module, **kwargs)
 
         mll = ExactMarginalLogLikelihood(self.model.likelihood, self.model)
 

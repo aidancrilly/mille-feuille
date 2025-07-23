@@ -63,6 +63,7 @@ def remove_nan_rows(arrays):
 class StandardScaler(Standardize):
     def __init__(self, m=1):
         super().__init__(m=m)
+        self.training_override = False
 
     def fit(self, Y):
         Y_torch = torch.tensor(Y, dtype=dtype, device=device)
@@ -79,13 +80,21 @@ class StandardScaler(Standardize):
     def transform(self, Y, return_torch=True):
         Y_torch = self._tensor_check(Y)
 
+        if self.training_override:
+            self.eval()
+
         if return_torch:
             # Get the transformed values without transformed noise
-            return self.forward(Y_torch)[0]
+            Y_return = self.forward(Y_torch)[0]
         else:
             # Get the transformed values without transformed noise
             Y_torch = self.forward(Y_torch)[0]
-            return Y_torch.detach().cpu().numpy()
+            Y_return = Y_torch.detach().cpu().numpy()
+
+        if self.training_override:
+            self.train()
+
+        return Y_return
 
     def inverse_transform(self, Y, Yvar, return_torch=True):
         Y_torch = self._tensor_check(Y)

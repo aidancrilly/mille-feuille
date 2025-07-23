@@ -1,3 +1,4 @@
+import copy
 import os
 import warnings
 
@@ -72,12 +73,29 @@ def test_singlefidelity_mean_module_GP(singlefidelitysample, testXs):
 
     state = State(ForresterDomain, Is, Xs, Ys)
 
+    output_scaler = copy.deepcopy(state.Y_scaler)
+    output_scaler.training_override = True
+
     mean_surrogate = SingleFidelityGPSurrogate()
-    mean_surrogate.init(state, mean_module=LowFidelityForresterMean(state.Y_scaler))
+    mean_module = LowFidelityForresterMean(output_scaler)
+    initial_mean_state_dict = mean_module.state_dict()
+    mean_surrogate.init(state, mean_module=mean_module)
     mean_surrogate.fit(state)
     testYs = mean_surrogate.predict(state, testXs)
 
     mean_surrogate.save("test.pth")
+
+    # Inspect mean_module trainable parameter
+    for param_name, param in initial_mean_state_dict.items():
+        if param_name in mean_surrogate.mean_module.state_dict():
+            if "raw_constant" in param_name:
+                assert not np.allclose(param, mean_surrogate.mean_module.state_dict()[param_name]), (
+                    f"Parameter {param_name} has not been updated in the mean module after training"
+                )
+            else:
+                assert np.allclose(param, mean_surrogate.mean_module.state_dict()[param_name]), (
+                    f"Parameter {param_name} in mean module does not match initial state dict"
+                )
 
     error_surrogate = SingleFidelityGPSurrogate()
     error_surrogate.init(state)
