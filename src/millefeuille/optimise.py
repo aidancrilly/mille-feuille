@@ -3,7 +3,7 @@ import time
 from botorch.optim import optimize_acqf, optimize_acqf_mixed
 
 from .state import State
-from .surrogate import BaseGPSurrogate
+from .surrogate import BaseSurrogate
 
 DEFAULT_NUM_RESTARTS = 1
 DEFAULT_RAW_SAMPLES = 256
@@ -53,7 +53,7 @@ def suggest_next_locations(
 ):
     # Check inputs
     assert isinstance(state, State)
-    assert isinstance(surrogate, BaseGPSurrogate)
+    assert isinstance(surrogate, BaseSurrogate)
 
     # Train the model
     if verbose:

@@ -24,7 +24,7 @@ class PythonForresterFunction(PythonSimulator):
     """
 
     def f(self, Xs):
-        ys = (6 * Xs - 2) ** 2 * np.sin(12 * Xs + 4)
+        ys = (6 * Xs - 2) ** 2 * np.sin(12 * Xs - 4)
         return ys
 
     def ABC_values(self, Ss):
@@ -56,7 +56,7 @@ class LowFidelityForresterMean(Mean):
         self.register_parameter(name="raw_constant", parameter=torch.nn.Parameter(torch.zeros(1)))
 
     def f(self, Xs):
-        ys = (6 * Xs - 2) ** 2 * torch.sin(12 * Xs + 4)
+        ys = (6 * Xs - 2) ** 2 * torch.sin(12 * Xs - 4)
         return ys
 
     def ABC_values(self, Ss):

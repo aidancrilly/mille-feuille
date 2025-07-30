@@ -44,7 +44,7 @@ def test_optimise_singlefidelity_GP(singlefidelitysample, batch_size, generate_a
     state = State(ForresterDomain, Is, Xs, Ys)
 
     surrogate = SingleFidelityGPSurrogate()
-    surrogate.init(state)
+    surrogate.init_GP_model(state)
 
     acq_function = generate_acq_function(surrogate, state)
 
