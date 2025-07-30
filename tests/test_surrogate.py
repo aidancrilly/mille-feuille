@@ -17,6 +17,7 @@ from .conftest import ForresterDomain, LowFidelityForresterMean, PythonForrester
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 dtype = torch.double
 
+
 @pytest_cases.fixture(params=[5, 10, 20])
 def ntrain(request):
     return request.param
@@ -129,12 +130,12 @@ class NNSurrogate(BasePyTorchModel):
             nn.Tanh(),
             nn.Linear(8, 8, dtype=dtype, device=device),
             nn.Tanh(),
-            nn.Linear(8, 1, dtype=dtype, device=device)
-            )
+            nn.Linear(8, 1, dtype=dtype, device=device),
+        )
 
     @property
     def optimiser(self):
-        return torch.optim.Adam(self.model.parameters(), lr = 1e-2)
+        return torch.optim.Adam(self.model.parameters(), lr=1e-2)
 
     @property
     def scheduler(self):
@@ -178,8 +179,11 @@ def test_singlefidelity_NNEnsemble(testXs):
     surrogate.save("test.pth")
 
     second_surrogate = SingleFidelityEnsembleSurrogate(
-        ensemble_size=ensemble_size, model_base_class=NNSurrogate, training_epochs=nepochs, batch_size=batch_size,
-        pretrained_file = "test.pth"
+        ensemble_size=ensemble_size,
+        model_base_class=NNSurrogate,
+        training_epochs=nepochs,
+        batch_size=batch_size,
+        pretrained_file="test.pth",
     )
     os.remove("test.pth")
 
