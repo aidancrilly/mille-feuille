@@ -45,7 +45,7 @@ program forrester_test
         real :: x
         real :: y
 
-        y = (6 * x - 2) ** 2 * sin(12 * x + 4)
+        y = (6 * x - 2) ** 2 * sin(12 * x - 4)
 
     end subroutine forrester
 

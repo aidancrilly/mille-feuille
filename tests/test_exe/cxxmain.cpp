@@ -13,7 +13,7 @@ using json = nlohmann::json;
 // Forrester test function (scalar variant)
 // ---------------------------------------------------------------------------
 inline double forrester(double x) {
-    return std::pow(6.0 * x - 2.0, 2) * std::sin(12.0 * x + 4.0);
+    return std::pow(6.0 * x - 2.0, 2) * std::sin(12.0 * x - 4.0);
 }
 
 int main(int argc, char **argv) {

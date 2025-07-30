@@ -5,12 +5,17 @@ import warnings
 import numpy as np
 import pytest
 import pytest_cases
+import torch
+import torch.nn as nn
 from botorch.exceptions.warnings import OptimizationWarning
 from millefeuille.initialise import generate_initial_sample
 from millefeuille.state import State
-from millefeuille.surrogate import SingleFidelityGPSurrogate
+from millefeuille.surrogate import BasePyTorchModel, SingleFidelityEnsembleSurrogate, SingleFidelityGPSurrogate
 
 from .conftest import ForresterDomain, LowFidelityForresterMean, PythonForresterFunction, sampler
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+dtype = torch.double
 
 
 @pytest_cases.fixture(params=[5, 10, 20])
@@ -47,14 +52,13 @@ def test_singlefidelity_GP(singlefidelitysample, testXs):
     state = State(ForresterDomain, Is, Xs, Ys)
 
     surrogate = SingleFidelityGPSurrogate()
-    surrogate.init(state)
     surrogate.fit(state)
     testYs = surrogate.predict(state, testXs)
 
     surrogate.save("test.pth")
 
     second_surrogate = SingleFidelityGPSurrogate()
-    second_surrogate.init(state)
+    second_surrogate.init_GP_model(state)
     second_surrogate.load("test.pth", eval=True)
     os.remove("test.pth")
     second_testYs = second_surrogate.predict(state, testXs)
@@ -80,7 +84,7 @@ def test_singlefidelity_mean_module_GP(singlefidelitysample, testXs):
     mean_surrogate = SingleFidelityGPSurrogate()
     mean_module = LowFidelityForresterMean(output_scaler)
     initial_mean_state_dict = mean_module.state_dict()
-    mean_surrogate.init(state, mean_module=mean_module)
+    mean_surrogate.init_GP_model(state, mean_module=mean_module)
     mean_surrogate.fit(state)
     testYs = mean_surrogate.predict(state, testXs)
 
@@ -99,15 +103,90 @@ def test_singlefidelity_mean_module_GP(singlefidelitysample, testXs):
                 )
 
     error_surrogate = SingleFidelityGPSurrogate()
-    error_surrogate.init(state)
+    error_surrogate.init_GP_model(state)
     # Check error is raised when don't use mean module
     with pytest.raises(Exception) as _:  # noqa
         error_surrogate.load("test.pth", eval=True)
 
     second_surrogate = SingleFidelityGPSurrogate()
-    second_surrogate.init(state, mean_module=LowFidelityForresterMean(state.Y_scaler))
+    second_surrogate.init_GP_model(state, mean_module=LowFidelityForresterMean(state.Y_scaler))
     second_surrogate.load("test.pth", eval=True)
     os.remove("test.pth")
+    second_testYs = second_surrogate.predict(state, testXs)
+
+    assert np.isclose(testYs["mean"], second_testYs["mean"]).all(), (
+        "Mean predictions diverged between saved and loaded surrogate model"
+    )
+    assert np.isclose(testYs["std"], second_testYs["std"]).all(), (
+        "Std. dev. predictions diverged between saved and loaded surrogate model"
+    )
+
+
+class NNSurrogate(BasePyTorchModel):
+    def __init__(self):
+        super().__init__()
+        self.model = nn.Sequential(
+            nn.Linear(1, 8, dtype=dtype, device=device),
+            nn.Tanh(),
+            nn.Linear(8, 8, dtype=dtype, device=device),
+            nn.Tanh(),
+            nn.Linear(8, 1, dtype=dtype, device=device),
+        )
+
+    @property
+    def optimiser(self):
+        return torch.optim.Adam(self.model.parameters(), lr=1e-2)
+
+    @property
+    def scheduler(self):
+        class do_nothing(nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def step(self):
+                pass
+
+        return do_nothing()
+
+    @staticmethod
+    def from_state_dict(state_dict):
+        model = NNSurrogate()
+        model.load_state_dict(state_dict)
+        return model
+
+
+@pytest.mark.unit
+def test_singlefidelity_NNEnsemble(testXs):
+    ntrain_NN = 50
+    batch_size = 32
+    nepochs = 400
+    ensemble_size = 10
+
+    Is = np.arange(ntrain_NN)
+    Xs, _ = generate_initial_sample(ForresterDomain, sampler, ntrain_NN)
+    f = PythonForresterFunction()
+    Ys = f(Is, Xs)
+
+    state = State(ForresterDomain, Is, Xs, Ys)
+
+    surrogate = SingleFidelityEnsembleSurrogate(
+        ensemble_size=ensemble_size, model_base_class=NNSurrogate, training_epochs=nepochs, batch_size=batch_size
+    )
+
+    surrogate.fit(state)
+    testYs = surrogate.predict(state, testXs)
+
+    surrogate.save("test.pth")
+
+    second_surrogate = SingleFidelityEnsembleSurrogate(
+        ensemble_size=ensemble_size,
+        model_base_class=NNSurrogate,
+        training_epochs=nepochs,
+        batch_size=batch_size,
+        pretrained_file="test.pth",
+    )
+    os.remove("test.pth")
+
     second_testYs = second_surrogate.predict(state, testXs)
 
     assert np.isclose(testYs["mean"], second_testYs["mean"]).all(), (
