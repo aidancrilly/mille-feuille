@@ -344,8 +344,12 @@ class EnsemblePyTorchModel(EnsembleModel):
             model.eval()
 
     def forward(self, X: Tensor) -> Tensor:
-        ys = torch.stack([m.model(X) for m in self.models], dim=1)
-        return ys.unsqueeze(-2)
+        N, q, D = X.shape  # Samples, q-batch, Feature
+        X_flat = X.reshape(N * q, D)
+
+        outputs = [model.model(X_flat).reshape(N, q, -1) for model in self.models]
+
+        return torch.stack(outputs, dim=1)  # (N, num_models, q, out_dim)
 
 
 class BaseEnsemblePyTorchSurrogate(BaseSurrogate, ABC):
@@ -432,7 +436,7 @@ class SingleFidelityEnsembleSurrogate(BaseEnsemblePyTorchSurrogate):
         Xs_unit = state.transform_X(Xs)
         test_X = torch.tensor(Xs_unit, dtype=dtype, device=device)
         with torch.no_grad():
-            post = self.model.posterior(test_X)
+            post = self.model.posterior(test_X.unsqueeze(1))
             mean = post.mean.cpu().numpy().reshape(-1, 1)
             var = post.variance.cpu().numpy().reshape(-1, 1)
             std = np.sqrt(var)
