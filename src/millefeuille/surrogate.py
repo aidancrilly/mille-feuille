@@ -90,8 +90,8 @@ class BaseSurrogate(ABC):
 ##################################################
 
 # Default GP hyperparameters
-DEFAULT_NOISE_INTERVAL = [1e-8, 1e-5]
-DEFAULT_LENGTHSCALE_INTERVAL = [0.005, 4.0]
+DEFAULT_NOISE_INTERVAL = (1e-8, 1e-5)
+DEFAULT_LENGTHSCALE_INTERVAL = (0.005, 4.0)
 
 
 class BaseGPSurrogate(BaseSurrogate, ABC):
@@ -99,11 +99,13 @@ class BaseGPSurrogate(BaseSurrogate, ABC):
     Abstract base class for all GP surrogate models in mille-feuille.
     """
 
-    def __init__(self):
+    def __init__(self, lengthscale_interval=DEFAULT_LENGTHSCALE_INTERVAL, noise_interval=DEFAULT_NOISE_INTERVAL):
         self.model = None
         self.mean_module = None
         self.likelihood = None
         self.state_dicts = None
+        self.noise_interval = noise_interval
+        self.lengthscale_interval = lengthscale_interval
 
     @abstractmethod
     def init_GP_model(self, state: State):
@@ -161,15 +163,13 @@ class SingleFidelityGPSurrogate(BaseGPSurrogate):
         self,
         state: State,
         mean_module: Module | None = None,
-        noise_interval=DEFAULT_NOISE_INTERVAL,
-        lengthscale_interval=DEFAULT_LENGTHSCALE_INTERVAL,
         **kwargs,
     ):
         X_torch, Y_torch = self.get_XY(state)
 
-        self.likelihood = GaussianLikelihood(noise_constraint=Interval(*noise_interval))
+        self.likelihood = GaussianLikelihood(noise_constraint=Interval(*self.noise_interval))
         covar_module = ScaleKernel(
-            MaternKernel(nu=2.5, ard_num_dims=state.dim, lengthscale_constraint=Interval(*lengthscale_interval))
+            MaternKernel(nu=2.5, ard_num_dims=state.dim, lengthscale_constraint=Interval(*self.lengthscale_interval))
         )
         self.mean_module = mean_module
         self.model = SingleTaskGP(
@@ -204,10 +204,10 @@ class SingleFidelityGPSurrogate(BaseGPSurrogate):
 
 
 class MultiFidelityGPSurrogate(BaseGPSurrogate):
-    def init(self, state, noise_interval=DEFAULT_NOISE_INTERVAL, lengthscale_interval=DEFAULT_LENGTHSCALE_INTERVAL):
+    def init(self, state):
         X_torch, Y_torch = self.get_XY(state)
 
-        self.likelihood = GaussianLikelihood(noise_constraint=Interval(*noise_interval))
+        self.likelihood = GaussianLikelihood(noise_constraint=Interval(*self.noise_interval))
 
         self.model = ModifiedSingleTaskMultiFidelityGP(
             X_torch, Y_torch, likelihood=self.likelihood, outcome_transform=None
