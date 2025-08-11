@@ -271,6 +271,8 @@ class EnsemblePyTorchModel(EnsembleModel):
     train_test_split: List[float]
     loss: type[nn.Module]
     reset_before_training: bool
+    _variance_calibration: float
+    _buffers_ready: bool
 
     def __init__(
         self,
@@ -282,6 +284,7 @@ class EnsemblePyTorchModel(EnsembleModel):
         train_test_split: List[float],
         loss: type[nn.Module],
         reset_before_training: bool,
+        variance_calibration: float,
     ):
         super().__init__()
         self.model_base_class = model_base_class
@@ -297,6 +300,12 @@ class EnsemblePyTorchModel(EnsembleModel):
 
         self.ensemble_size = ensemble_size
         self._num_outputs = 1
+        self._variance_calibration = variance_calibration
+
+        # Lazy-initialized buffers
+        self._buffers_ready = False
+        self.register_buffer("_vc", torch.tensor(1.0), persistent=True)
+        self.register_buffer("_sqrt_vc", torch.tensor(1.0), persistent=True)
 
         self.training_epochs = training_epochs
         self.batch_size = batch_size
@@ -316,6 +325,23 @@ class EnsemblePyTorchModel(EnsembleModel):
 
     def reset_models(self):
         self.models = [self.model_base_class.from_state_dict(sd) for _, sd in self.starting_state_dicts.items()]
+
+    @property
+    def variance_calibration(self) -> float:
+        return self._variance_calibration
+
+    @variance_calibration.setter
+    def variance_calibration(self, value: float):
+        if value < 0:
+            raise ValueError("variance_calibration must be non-negative.")
+        self._variance_calibration = float(value)
+        self._buffers_ready = False  # force refresh next forward()
+
+    def _ensure_buffers(self, ref: torch.Tensor):
+        if not self._buffers_ready or self._vc.device != ref.device or self._vc.dtype != ref.dtype:
+            self._vc = torch.as_tensor(self._variance_calibration, device=ref.device, dtype=ref.dtype)
+            self._sqrt_vc = torch.sqrt(self._vc)
+            self._buffers_ready = True
 
     def fit(self, X: Tensor, y: Tensor) -> None:
         if self.reset_before_training:
@@ -349,7 +375,15 @@ class EnsemblePyTorchModel(EnsembleModel):
 
         outputs = [model.model(X_flat).reshape(N, q, -1) for model in self.models]
 
-        return torch.stack(outputs, dim=1)  # (N, num_models, q, out_dim)
+        Y = torch.stack(outputs, dim=1)  # (N, num_models, q, out_dim)
+
+        # Variance calibration
+        # Artifically increase variance in ensemble by variance_calibration
+        self._ensure_buffers(Y)
+        mean_Y = Y.mean(dim=1, keepdim=True)
+        Y = self._sqrt_vc * Y + (1.0 - self._sqrt_vc) * mean_Y
+
+        return Y
 
 
 class BaseEnsemblePyTorchSurrogate(BaseSurrogate, ABC):
@@ -367,6 +401,7 @@ class BaseEnsemblePyTorchSurrogate(BaseSurrogate, ABC):
         train_test_split: List[float] | None = None,
         loss: type[nn.Module] | None = None,
         reset_before_training: bool = True,
+        variance_calibration: float = 1.0,
     ):
         self.model_base_class = model_base_class
         self.ensemble_size = ensemble_size
@@ -394,6 +429,7 @@ class BaseEnsemblePyTorchSurrogate(BaseSurrogate, ABC):
             train_test_split,
             loss,
             reset_before_training,
+            variance_calibration,
         )
         self.ensemble_state_dicts = self.model.get_state_dicts()
 
