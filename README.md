@@ -1,5 +1,7 @@
 # mille-feuille
 
+![workflow badge](https://github.com/aidancrilly/mille-feuille/actions/workflows/run_tests.yml/badge.svg)
+
 <center><img src="https://github.com/aidancrilly/mille-feuille/blob/main/logo/MF_logo.webp" width="200" title="mille-feuille" alt="mille-feuille" align="middle"/></center>
 
 `mille‑feuille` is a thin layer on top of [**BoTorch**](https://botorch.org/) that adds the plumbing you need to run optimisation loops against expensive HPC codes—locally while you prototype, or scaled out on a cluster when the time comes.
