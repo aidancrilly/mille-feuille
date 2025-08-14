@@ -267,7 +267,7 @@ class State:
         else:  # Check shape
             assert len(names) == array_shape[1]
         return names
-    
+
     def to_csv(self, filename: str):
         """
         Save index, Xs, Ps, Ss, Ys to a CSV file.
@@ -396,14 +396,14 @@ class State:
                     f.attrs["best_value_transformed"] = np.asarray(self.best_value_transformed)
                 except Exception:
                     pass
-                
+
     @staticmethod
     def load(filename: str, Y_scaler: None | object):
         def _read_list_of_str(fobj, key):
             if key in fobj:
                 raw = fobj[key][:]
                 # Handle bytes vs str
-                return [s.decode("utf-8") if isinstance(s, (bytes, np.bytes_)) else str(s) for s in raw]
+                return [s.decode("utf-8") if isinstance(s, bytes | np.bytes_) else str(s) for s in raw]
             return None
 
         with h5py.File(filename, "r") as f:
@@ -431,11 +431,11 @@ class State:
                 )
                 # Fill optional fields when available
                 if "fidelities" in grp:
-                    setattr(fidelity_domain, "fidelities", grp["fidelities"][:].tolist())
+                    fidelity_domain.fidelities = grp["fidelities"][:].tolist()
                 if "target_fidelity" in grp:
-                    setattr(fidelity_domain, "target_fidelity", grp["target_fidelity"][:])
+                    fidelity_domain.target_fidelity = grp["target_fidelity"][:]
                 if "fidelity_features" in grp:
-                    setattr(fidelity_domain, "fidelity_features", grp["fidelity_features"][:])
+                    fidelity_domain.fidelity_features = grp["fidelity_features"][:]
 
             # --------------------
             # Arrays

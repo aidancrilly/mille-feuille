@@ -1,6 +1,6 @@
-from .definitions import *
 from .acquisition import *
 from .cost import *
+from .definitions import *
 from .domain import *
 from .initialise import *
 from .kernel import *
