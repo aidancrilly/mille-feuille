@@ -26,7 +26,7 @@ def multifidelitysample(nsample, request):
     Xs, _ = generate_initial_sample(ForresterDomain, sampler, nsample)
     f = PythonForresterFunction()
     Ss = np.random.binomial(1, request.param, size=nsample).reshape(-1, 1)
-    Ys = f(Is, Xs, Ss)
+    _, Ys = f(Is, Xs, Ss)
     return Is, Xs, Ys, Ss
 
 

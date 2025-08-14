@@ -8,15 +8,12 @@ import numpy.typing as npt
 import torch
 from botorch.models.transforms.outcome import Standardize
 
+from .definitions import device, dtype
 from .domain import FidelityDomain, InputDomain
 
 """
 Defines the optimiser state
 """
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(device)
-dtype = torch.double
 
 
 def check_for_2D_shape(arrays):
@@ -192,9 +189,6 @@ class State:
         # Remove NaN-ed indices
         index_next, X_next, Y_next, P_next, S_next = remove_nan_rows([index_next, X_next, Y_next, P_next, S_next])
 
-        self.best_value = max(self.best_value, Y_next.max(axis=0))
-        self.best_value_transformed = self.Y_scaler.transform(self.best_value, return_torch=False)
-
         self.index = np.append(self.index, index_next, axis=0)
 
         self.Xs = np.append(self.Xs, X_next, axis=0)
@@ -206,6 +200,9 @@ class State:
 
         if refit_scaler and self.Ys.shape[0] > 1:
             self.Y_scaler.fit(self.Ys)
+
+        self.best_value = self.Ys.max(axis=0)
+        self.best_value_transformed = self.Y_scaler.transform(self.best_value, return_torch=False)
 
         self.nsamples = self.Ys.shape[0]
 
@@ -271,77 +268,6 @@ class State:
             assert len(names) == array_shape[1]
         return names
 
-    def save(self, filename: str):
-        with h5py.File(filename, "w") as f:
-            # Input domain
-            f.create_dataset("input_domain/b_low", data=self.input_domain.b_low)
-            f.create_dataset("input_domain/b_up", data=self.input_domain.b_up)
-            f.create_dataset("input_domain/steps", data=self.input_domain.steps)
-            f.attrs["input_dim"] = self.input_domain.dim
-
-            # Fidelity domain (optional)
-            if self.fidelity_domain is not None:
-                grp = f.create_group("fidelity_domain")
-                grp.attrs["num_fidelities"] = self.fidelity_domain.num_fidelities
-                grp.create_dataset("costs", data=self.fidelity_domain.costs)
-                f.attrs["has_fidelity_domain"] = True
-            else:
-                f.attrs["has_fidelity_domain"] = False
-
-            # Arrays
-            f.create_dataset("index", data=self.index)
-            f.create_dataset("Xs", data=self.Xs)
-            f.create_dataset("Ys", data=self.Ys)
-            if self.Ps is not None:
-                f.create_dataset("Ps", data=self.Ps)
-            if self.Ss is not None:
-                f.create_dataset("Ss", data=self.Ss)
-
-            # Scalar metadata
-            f.attrs["nsamples"] = self.nsamples
-            f.attrs["best_value"] = self.best_value
-            f.attrs["best_value_transformed"] = self.best_value_transformed
-
-    @staticmethod
-    def load(filename: str, Y_scaler: None | object):
-        with h5py.File(filename, "r") as f:
-            # Input domain
-            input_domain = InputDomain(
-                dim=int(f.attrs["input_dim"]),
-                b_low=f["input_domain/b_low"][:],
-                b_up=f["input_domain/b_up"][:],
-                steps=f["input_domain/steps"][:],
-            )
-
-            # Fidelity domain
-            fidelity_domain = None
-            if f.attrs["has_fidelity_domain"]:
-                grp = f["fidelity_domain"]
-                fidelity_domain = FidelityDomain(
-                    num_fidelities=int(grp.attrs["num_fidelities"]), costs=grp["costs"][:].tolist()
-                )
-
-            # Arrays
-            index = f["index"][:]
-            Xs = f["Xs"][:]
-            Ys = f["Ys"][:]
-            Ps = f["Ps"][:] if "Ps" in f else None
-            Ss = f["Ss"][:] if "Ss" in f else None
-
-            return State(
-                input_domain=input_domain,
-                index=index,
-                Xs=Xs,
-                Ys=Ys,
-                Ps=Ps,
-                Ss=Ss,
-                Y_scaler=Y_scaler,
-                fidelity_domain=fidelity_domain,
-                nsamples=int(f.attrs["nsamples"]),
-                best_value=float(f.attrs["best_value"]),
-                best_value_transformed=float(f.attrs["best_value_transformed"]),
-            )
-
     def to_csv(self, filename: str):
         """
         Save index, Xs, Ps, Ss, Ys to a CSV file.
@@ -391,3 +317,176 @@ class State:
             if mode == "w":
                 writer.writerow(header)
             writer.writerows(new_data)
+
+    def save(self, filename: str):
+        # Use variable-length UTF-8 strings for names
+        str_dt = h5py.string_dtype(encoding="utf-8")
+
+        with h5py.File(filename, "w") as f:
+            # --------------------
+            # Input domain
+            # --------------------
+            grp_in = f.create_group("input_domain")
+            grp_in.create_dataset("b_low", data=self.input_domain.b_low)
+            grp_in.create_dataset("b_up", data=self.input_domain.b_up)
+            grp_in.create_dataset("steps", data=self.input_domain.steps)
+            f.attrs["input_dim"] = int(self.input_domain.dim)
+
+            # --------------------
+            # Fidelity domain (optional)
+            # --------------------
+            if self.fidelity_domain is not None:
+                grp_fd = f.create_group("fidelity_domain")
+                grp_fd.attrs["num_fidelities"] = int(self.fidelity_domain.num_fidelities)
+
+                # Store what we can, if present on the object
+                if getattr(self.fidelity_domain, "costs", None) is not None:
+                    grp_fd.create_dataset("costs", data=np.asarray(self.fidelity_domain.costs))
+                if getattr(self.fidelity_domain, "fidelities", None) is not None:
+                    grp_fd.create_dataset("fidelities", data=np.asarray(self.fidelity_domain.fidelities))
+                if getattr(self.fidelity_domain, "target_fidelity", None) is not None:
+                    grp_fd.create_dataset("target_fidelity", data=np.asarray(self.fidelity_domain.target_fidelity))
+                if getattr(self.fidelity_domain, "fidelity_features", None) is not None:
+                    grp_fd.create_dataset("fidelity_features", data=np.asarray(self.fidelity_domain.fidelity_features))
+                f.attrs["has_fidelity_domain"] = True
+            else:
+                f.attrs["has_fidelity_domain"] = False
+
+            # --------------------
+            # Arrays (only create datasets if present)
+            # --------------------
+            for name in ("index", "Xs", "Ys", "Ps", "Ss"):
+                arr = getattr(self, name)
+                if arr is not None:
+                    f.create_dataset(name, data=arr)
+
+            # --------------------
+            # Column name lists
+            # --------------------
+            names_map = {
+                "index_names": self.index_names,
+                "X_names": self.X_names,
+                "Y_names": self.Y_names,
+                "P_names": self.P_names,
+                "S_names": self.S_names,
+            }
+            for key, val in names_map.items():
+                if val is not None:
+                    # store as variable-length UTF-8 strings
+                    f.create_dataset(key, data=np.array(val, dtype=object), dtype=str_dt)
+
+            # --------------------
+            # Metadata
+            # --------------------
+            f.attrs["nsamples"] = int(self.nsamples)
+
+            # Save best values as datasets (vector-friendly).
+            # Also keep attrs for backward compatibility/readability.
+            if self.best_value is not None:
+                f.create_dataset("best_value", data=np.asarray(self.best_value))
+                try:
+                    # If vector, HDF5 can still store as attr; if it fails, we skip.
+                    f.attrs["best_value"] = np.asarray(self.best_value)
+                except Exception:
+                    pass
+
+            if self.best_value_transformed is not None:
+                f.create_dataset("best_value_transformed", data=np.asarray(self.best_value_transformed))
+                try:
+                    f.attrs["best_value_transformed"] = np.asarray(self.best_value_transformed)
+                except Exception:
+                    pass
+
+    @staticmethod
+    def load(filename: str, Y_scaler: None | object):
+        def _read_list_of_str(fobj, key):
+            if key in fobj:
+                raw = fobj[key][:]
+                # Handle bytes vs str
+                return [s.decode("utf-8") if isinstance(s, bytes | np.bytes_) else str(s) for s in raw]
+            return None
+
+        with h5py.File(filename, "r") as f:
+            # --------------------
+            # Input domain
+            # --------------------
+            input_domain = InputDomain(
+                dim=int(f.attrs["input_dim"]),
+                b_low=f["input_domain/b_low"][:],
+                b_up=f["input_domain/b_up"][:],
+                steps=f["input_domain/steps"][:],
+            )
+
+            # --------------------
+            # Fidelity domain (optional)
+            # --------------------
+            fidelity_domain = None
+            if bool(f.attrs.get("has_fidelity_domain", False)):
+                grp = f["fidelity_domain"]
+                # Older files might only have costs; newer can have more fields
+                costs = grp["costs"][:].tolist() if "costs" in grp else None
+                fidelity_domain = FidelityDomain(
+                    num_fidelities=int(grp.attrs["num_fidelities"]),
+                    costs=costs,
+                )
+                # Fill optional fields when available
+                if "fidelities" in grp:
+                    fidelity_domain.fidelities = grp["fidelities"][:].tolist()
+                if "target_fidelity" in grp:
+                    fidelity_domain.target_fidelity = grp["target_fidelity"][:]
+                if "fidelity_features" in grp:
+                    fidelity_domain.fidelity_features = grp["fidelity_features"][:]
+
+            # --------------------
+            # Arrays
+            # --------------------
+            index = f["index"][:] if "index" in f else None
+            Xs = f["Xs"][:] if "Xs" in f else None
+            Ys = f["Ys"][:] if "Ys" in f else None
+            Ps = f["Ps"][:] if "Ps" in f else None
+            Ss = f["Ss"][:] if "Ss" in f else None
+
+            # --------------------
+            # Column name lists (optional)
+            # --------------------
+            index_names = _read_list_of_str(f, "index_names")
+            X_names = _read_list_of_str(f, "X_names")
+            Y_names = _read_list_of_str(f, "Y_names")
+            P_names = _read_list_of_str(f, "P_names")
+            S_names = _read_list_of_str(f, "S_names")
+
+            # --------------------
+            # Metadata
+            # --------------------
+            nsamples = int(f.attrs.get("nsamples", Ys.shape[0] if Ys is not None else 0))
+
+            # Prefer datasets (vector-safe); fall back to (older) attrs when needed
+            if "best_value" in f:
+                best_value = f["best_value"][:]
+            else:
+                # Older files may have stored a scalar attr
+                best_value = np.asarray(f.attrs.get("best_value", -float("inf")))
+
+            if "best_value_transformed" in f:
+                best_value_transformed = f["best_value_transformed"][:]
+            else:
+                best_value_transformed = np.asarray(f.attrs.get("best_value_transformed", -float("inf")))
+
+            return State(
+                input_domain=input_domain,
+                index=index,
+                Xs=Xs,
+                Ys=Ys,
+                Ps=Ps,
+                Ss=Ss,
+                index_names=index_names,
+                X_names=X_names,
+                Y_names=Y_names,
+                P_names=P_names,
+                S_names=S_names,
+                Y_scaler=Y_scaler,
+                fidelity_domain=fidelity_domain,
+                nsamples=nsamples,
+                best_value=best_value,
+                best_value_transformed=best_value_transformed,
+            )

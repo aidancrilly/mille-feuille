@@ -28,7 +28,7 @@ def singlefidelitysample(ntrain):
     Is = np.arange(ntrain)
     Xs, _ = generate_initial_sample(ForresterDomain, sampler, ntrain)
     f = PythonForresterFunction()
-    Ys = f(Is, Xs)
+    _, Ys = f(Is, Xs)
     return Is, Xs, Ys
 
 
@@ -165,7 +165,7 @@ def test_singlefidelity_NNEnsemble(testXs):
     Is = np.arange(ntrain_NN)
     Xs, _ = generate_initial_sample(ForresterDomain, sampler, ntrain_NN)
     f = PythonForresterFunction()
-    Ys = f(Is, Xs)
+    _, Ys = f(Is, Xs)
 
     state = State(ForresterDomain, Is, Xs, Ys)
 

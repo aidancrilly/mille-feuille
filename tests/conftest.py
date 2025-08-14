@@ -40,7 +40,7 @@ class PythonForresterFunction(PythonSimulator):
 
     def __call__(self, indices, Xs, Ss=None):
         A, B, C = self.ABC_values(Ss)
-        return -(A * self.f(Xs) + B * (Xs - 0.5) + C)
+        return None, -(A * self.f(Xs) + B * (Xs - 0.5) + C)
 
 
 class LowFidelityForresterMean(Mean):
