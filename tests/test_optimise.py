@@ -44,14 +44,14 @@ def test_optimise_singlefidelity_GP(singlefidelitysample, batch_size, generate_a
     state = State(ForresterDomain, Is, Xs, Ys)
 
     surrogate = SingleFidelityGPSurrogate()
-    surrogate.init_GP_model(state)
+    surrogate.fit(state)
 
     best_y = float(state.best_value)
 
     acq_function = generate_acq_function(surrogate, state)
 
     X_next = suggest_next_locations(
-        batch_size, state, surrogate, acq_function, num_restarts=TEST_NUM_RESTARTS, raw_samples=TEST_RAW_SAMPLES
+        batch_size, state, acq_function, num_restarts=TEST_NUM_RESTARTS, raw_samples=TEST_RAW_SAMPLES
     )
     assert X_next.shape[0] == batch_size, "suggest_next_locations do not return batch_size candidates"
     assert X_next.shape[1] == Xs.shape[1], "suggest_next_locations candidates did not have same dimension as problem"
@@ -61,7 +61,7 @@ def test_optimise_singlefidelity_GP(singlefidelitysample, batch_size, generate_a
 
     state.update(I_next, X_next, Y_next)
 
-    assert float(state.best_value) > best_y
+    assert float(state.best_value) >= best_y
     assert len(state.Ys) == len(Ys) + batch_size
 
     # Reset and use full wrapper

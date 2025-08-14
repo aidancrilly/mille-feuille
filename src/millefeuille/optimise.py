@@ -3,7 +3,6 @@ import time
 from botorch.optim import optimize_acqf, optimize_acqf_mixed
 
 from .state import State
-from .surrogate import BaseSurrogate
 
 DEFAULT_NUM_RESTARTS = 10
 DEFAULT_RAW_SAMPLES = 256
@@ -44,7 +43,6 @@ def generate_batch(
 def suggest_next_locations(
     batch_size,
     state,
-    surrogate,
     acq_function,
     num_restarts=DEFAULT_NUM_RESTARTS,
     raw_samples=DEFAULT_RAW_SAMPLES,
@@ -53,15 +51,6 @@ def suggest_next_locations(
 ):
     # Check inputs
     assert isinstance(state, State)
-    assert isinstance(surrogate, BaseSurrogate)
-
-    # Train the model
-    if verbose:
-        start = time.time()
-        print("Training surrogate...")
-    surrogate.fit(state)
-    if verbose:
-        print(f"Surrogate trained in {time.time() - start} s")
 
     # Create a batch
     if verbose:
