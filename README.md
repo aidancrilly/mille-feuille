@@ -1,6 +1,6 @@
 # mille-feuille
 
-![workflow badge](https://github.com/aidancrilly/mille-feuille/actions/workflows/run_tests.yml/badge.svg)
+![workflow badge](https://github.com/aidancrilly/mille-feuille/actions/workflows/run_tests.yaml/badge.svg)
 
 <center><img src="https://github.com/aidancrilly/mille-feuille/blob/main/logo/MF_logo.webp" width="200" title="mille-feuille" alt="mille-feuille" align="middle"/></center>
 
