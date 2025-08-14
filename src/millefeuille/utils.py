@@ -2,8 +2,8 @@ import numpy as np
 from scipy.stats import norm
 
 from .optimise import *
-from .surrogate import BaseSurrogate
 from .simulator import *
+from .surrogate import BaseSurrogate
 
 """
 Defines some useful utility functions which do not fit into the defined classes

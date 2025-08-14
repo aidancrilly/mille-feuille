@@ -10,7 +10,7 @@ from millefeuille.utils import run_Bayesian_optimiser
 from .conftest import TEST_NUM_RESTARTS, TEST_RAW_SAMPLES, ForresterDomain, PythonForresterFunction
 
 
-@pytest_cases.fixture(params=[6])
+@pytest_cases.fixture(params=[16])
 def ntrain(request):
     return request.param
 
@@ -31,7 +31,8 @@ def generate_acq_function(request):
 @pytest_cases.fixture()
 def singlefidelitysample(ntrain):
     Is = np.arange(ntrain)
-    Xs = np.append(np.linspace(0.0, 0.5, ntrain - 3), [0.7, 0.8, 1.0]).reshape(ntrain, 1)
+    Xs = np.linspace(0.0, 1.0, ntrain + 1)
+    Xs = np.delete(Xs, np.argmin((Xs - 0.75725) ** 2)).reshape(ntrain, 1)
     f = PythonForresterFunction()
     _, Ys = f(Is, Xs)
     return Is, Xs, Ys, f
