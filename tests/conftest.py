@@ -11,6 +11,9 @@ from gpytorch.means import Mean
 from millefeuille.domain import InputDomain
 from millefeuille.simulator import ExectuableSimulator, PythonSimulator, Scheduler
 
+TEST_NUM_RESTARTS = 1
+TEST_RAW_SAMPLES = 16
+
 sampler = np.random.default_rng(seed=12345)
 
 
