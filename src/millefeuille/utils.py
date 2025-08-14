@@ -2,6 +2,7 @@ import numpy as np
 from scipy.stats import norm
 
 from .optimise import *
+from .surrogate import BaseSurrogate
 from .simulator import *
 
 """
