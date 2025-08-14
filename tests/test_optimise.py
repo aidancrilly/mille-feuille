@@ -7,7 +7,7 @@ from millefeuille.state import State
 from millefeuille.surrogate import SingleFidelityGPSurrogate
 from millefeuille.utils import run_Bayesian_optimiser
 
-from .conftest import ForresterDomain, PythonForresterFunction
+from .conftest import TEST_NUM_RESTARTS, TEST_RAW_SAMPLES, ForresterDomain, PythonForresterFunction
 
 
 @pytest_cases.fixture(params=[6])
@@ -50,7 +50,9 @@ def test_optimise_singlefidelity_GP(singlefidelitysample, batch_size, generate_a
 
     acq_function = generate_acq_function(surrogate, state)
 
-    X_next = suggest_next_locations(batch_size, state, surrogate, acq_function)
+    X_next = suggest_next_locations(
+        batch_size, state, surrogate, acq_function, num_restarts=TEST_NUM_RESTARTS, raw_samples=TEST_RAW_SAMPLES
+    )
     assert X_next.shape[0] == batch_size, "suggest_next_locations do not return batch_size candidates"
     assert X_next.shape[1] == Xs.shape[1], "suggest_next_locations candidates did not have same dimension as problem"
 
@@ -67,6 +69,15 @@ def test_optimise_singlefidelity_GP(singlefidelitysample, batch_size, generate_a
     surrogate = SingleFidelityGPSurrogate()
     surrogate.init_GP_model(initial_state)
 
-    new_state = run_Bayesian_optimiser(1, batch_size, generate_acq_function, initial_state, surrogate, f)
+    new_state = run_Bayesian_optimiser(
+        1,
+        batch_size,
+        generate_acq_function,
+        initial_state,
+        surrogate,
+        f,
+        num_restarts=TEST_NUM_RESTARTS,
+        raw_samples=TEST_RAW_SAMPLES,
+    )
 
     assert np.isclose(new_state.best_value, state.best_value, rtol=1e-2)
