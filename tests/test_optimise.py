@@ -47,7 +47,6 @@ def test_optimise_singlefidelity_GP(singlefidelitysample, batch_size, generate_a
     surrogate.init_GP_model(state)
 
     best_y = float(state.best_value)
-    print(best_y)
 
     acq_function = generate_acq_function(surrogate, state)
 
