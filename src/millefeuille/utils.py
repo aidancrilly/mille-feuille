@@ -3,6 +3,7 @@ from scipy.stats import norm
 
 from .optimise import *
 from .simulator import *
+from .surrogate import BaseSurrogate
 
 """
 Defines some useful utility functions which do not fit into the defined classes
@@ -124,18 +125,18 @@ def run_Bayesian_optimiser(
     if isinstance(simulator, ExectuableSimulator) and scheduler is None:
         print("If simulator is an ExecutableSimulator, you must provide a scheduler")
         raise Exception
+    assert isinstance(surrogate, BaseSurrogate)
 
     for _ in range(Nsamples):
+        surrogate.fit(state)
         acq_function = generate_acq_function(surrogate, state)
 
         if state.l_MultiFidelity:
             X_next, S_next = suggest_next_locations(
-                batch_size, state, surrogate, acq_function=acq_function, verbose=verbose, **kwargs
+                batch_size, state, acq_function=acq_function, verbose=verbose, **kwargs
             )
         else:
-            X_next = suggest_next_locations(
-                batch_size, state, surrogate, acq_function=acq_function, verbose=verbose, **kwargs
-            )
+            X_next = suggest_next_locations(batch_size, state, acq_function=acq_function, verbose=verbose, **kwargs)
             S_next = None
 
         index_next = state.index[-1] + np.arange(batch_size) + 1

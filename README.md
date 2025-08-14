@@ -81,7 +81,7 @@ state = State(
 
 # Create surrogate model based on state
 surrogate = SingleFidelityGPSurrogate()
-surrogate.init(state)
+surrogate.fit(state)
 
 # 4. Optimiser call ---------------------------------------------------------
 # Use botorch acquistion functions
