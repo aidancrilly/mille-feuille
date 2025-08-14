@@ -90,7 +90,6 @@ acq_function = qUpperConfidenceBound(surrogate.model,beta=0.5)
 X_next = suggest_next_locations(
     batch_size=2,
     state=state,
-    surrogate=surrogate,
     acq_function=acq_function
 )
 print(X_next)    # candidate points in original scale
