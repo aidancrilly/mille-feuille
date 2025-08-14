@@ -8,15 +8,12 @@ import numpy.typing as npt
 import torch
 from botorch.models.transforms.outcome import Standardize
 
+from .definitions import device, dtype
 from .domain import FidelityDomain, InputDomain
 
 """
 Defines the optimiser state
 """
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(device)
-dtype = torch.double
 
 
 def check_for_2D_shape(arrays):
@@ -192,9 +189,6 @@ class State:
         # Remove NaN-ed indices
         index_next, X_next, Y_next, P_next, S_next = remove_nan_rows([index_next, X_next, Y_next, P_next, S_next])
 
-        self.best_value = max(self.best_value, Y_next.max(axis=0))
-        self.best_value_transformed = self.Y_scaler.transform(self.best_value, return_torch=False)
-
         self.index = np.append(self.index, index_next, axis=0)
 
         self.Xs = np.append(self.Xs, X_next, axis=0)
@@ -206,6 +200,9 @@ class State:
 
         if refit_scaler and self.Ys.shape[0] > 1:
             self.Y_scaler.fit(self.Ys)
+
+        self.best_value = self.Ys.max(axis=0)
+        self.best_value_transformed = self.Y_scaler.transform(self.best_value, return_torch=False)
 
         self.nsamples = self.Ys.shape[0]
 

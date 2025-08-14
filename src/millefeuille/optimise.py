@@ -5,7 +5,7 @@ from botorch.optim import optimize_acqf, optimize_acqf_mixed
 from .state import State
 from .surrogate import BaseSurrogate
 
-DEFAULT_NUM_RESTARTS = 1
+DEFAULT_NUM_RESTARTS = 10
 DEFAULT_RAW_SAMPLES = 256
 
 

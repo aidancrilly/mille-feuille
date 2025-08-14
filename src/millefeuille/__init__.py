@@ -1,3 +1,4 @@
+from .definitions import *
 from .acquisition import *
 from .cost import *
 from .domain import *
