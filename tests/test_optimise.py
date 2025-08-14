@@ -10,7 +10,7 @@ from millefeuille.utils import run_Bayesian_optimiser
 from .conftest import ForresterDomain, PythonForresterFunction
 
 
-@pytest_cases.fixture(params=[5])
+@pytest_cases.fixture(params=[6])
 def ntrain(request):
     return request.param
 
