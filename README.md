@@ -4,7 +4,7 @@
 
 <center><img src="https://github.com/aidancrilly/mille-feuille/blob/main/logo/MF_logo.webp" width="200" title="mille-feuille" alt="mille-feuille" align="middle"/></center>
 
-`mille‑feuille` is a thin layer on top of [**BoTorch**](https://botorch.org/) that adds the plumbing you need to run optimisation loops against expensive HPC codes.
+`mille‑feuille` is a thin layer on top of [**BoTorch**](https://botorch.org/) that adds the plumbing you need to run Bayesian optimisation loops against expensive MPI-parallelised HPC codes.
 
 > **Status:** early days – very much a work in progress
 
@@ -113,11 +113,11 @@ Take a look at the simple (fortran90 and C++) examples implemented in the test s
 
 ## 🤝 Relationship to BoTorch
 
-`mille‑feuille` is *additive*: all modelling and acquisition is delegated to BoTorch. What we provide is
+`mille‑feuille` is *additive*: all optimisation is delegated to BoTorch. What we provide is
 
 - **Thin wrappers** around BoTorch models so you can swap simulators and surrogates without touching the optimiser loop.
+- **Surrogate model templates** providing a more structured way of introducing GPyTorch and pure PyTorch based models as surrogates.
 - **State and simulator bookkeeping** streamlining the interaction between HPC codes and BO.
-- **Job scheduling adapters** so the same simulator class can be adapted to different HPC systems.
 
 When you need full flexibility you can always drop down and call BoTorch directly.
 
@@ -125,9 +125,8 @@ When you need full flexibility you can always drop down and call BoTorch directl
 
 ## 🛠️ Roadmap / work in progress
 
-- **Alternative surrogates** – initial experiments with NN-ensemble based surrogates.
 - **Schedulers** – reference Slurm & PBS implementations.
-- **Examples** – Show .`Simulator` Classes for open source HPC physics codes.
+- **Multi-Fidelity** - more complete multi-fidelity treatment.
 
 ---
 
