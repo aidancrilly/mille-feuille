@@ -133,7 +133,9 @@ def run_Bayesian_optimiser(
                 batch_size, state, surrogate, acq_function=acq_function, verbose=verbose, **kwargs
             )
         else:
-            X_next = suggest_next_locations(batch_size, state, surrogate, acq_function=acq_function, verbose=verbose, **kwargs)
+            X_next = suggest_next_locations(
+                batch_size, state, surrogate, acq_function=acq_function, verbose=verbose, **kwargs
+            )
             S_next = None
 
         index_next = state.index[-1] + np.arange(batch_size) + 1
