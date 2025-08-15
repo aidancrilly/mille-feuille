@@ -22,6 +22,9 @@ class Simulator(ExectuableSimulator):
 
     - All key simulation parameters are written to a summary csv to be read by pandas
 
+    - A single fidelity is run such that each execution of Simulator uses the same number of cores
+    as specified in the input template
+
     """
 
     def __init__(self, base_paths, io_params):
