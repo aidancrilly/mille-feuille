@@ -65,7 +65,7 @@ class Simulator(ExectuableSimulator):
         self.replace_inputs(input_file, input_dict)
 
     def launch(self, indices, Xs, scheduler, Ss=None):
-        input_paths = [f"{self.inputs_dir}/input_{str(i).zfill(self.index_length)}.f90" for i in indices]
+        input_paths = [f"{self.inputs_dir}/input_{str(i).zfill(self.index_length)}.nml" for i in indices]
         str_indices = [str(i).zfill(self.index_length) for i in indices]
         scheduler.launch_jobs(self.exe, self.nproc, input_paths, str_indices)
 
