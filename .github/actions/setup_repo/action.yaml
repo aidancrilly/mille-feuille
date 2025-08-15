@@ -58,7 +58,7 @@ runs:
       shell: bash
 
     - name: Compile test executables
-      working-directory: ./tests/test_exe
+      working-directory: ./examples/test_executables
       run: |
         mpiifx -g -traceback -r8 fmain.f90 -o fmain
         mpiicpx -g -traceback cxxmain.cpp -o cxxmain

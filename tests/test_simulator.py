@@ -1,16 +1,21 @@
+import os
+import sys
+
 import numpy as np
 import pytest
 import pytest_cases
 from millefeuille.initialise import generate_initial_sample
 
 from .conftest import (
-    CXXExecutableForrestorSimulator,
     ForresterDomain,
-    FortranExecutableForrestorSimulator,
     PythonForresterFunction,
-    ShellScheduler,
     sampler,
 )
+
+sys.path.append(os.path.join(os.path.dirname(__file__), "../examples/test_executables/"))
+
+from TestScheduler import ShellScheduler
+from TestSimulator import CXXExecutableForrestorSimulator, FortranExecutableForrestorSimulator
 
 index_length = 4
 

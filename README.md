@@ -4,7 +4,7 @@
 
 <center><img src="https://github.com/aidancrilly/mille-feuille/blob/main/logo/MF_logo.webp" width="200" title="mille-feuille" alt="mille-feuille" align="middle"/></center>
 
-`mille‑feuille` is a thin layer on top of [**BoTorch**](https://botorch.org/) that adds the plumbing you need to run Bayesian optimisation loops against expensive MPI-parallelised HPC codes.
+`mille‑feuille` acts as an orchestrator when running sampling, learning and optimisation loops against expensive MPI-parallelised HPC codes. For optimisation, `mille‑feuille` is a thin wrapper on top of [**BoTorch**](https://botorch.org/), providing the necessary interface between simulators, surrogates and optimisers.
 
 > **Status:** early days – very much a work in progress
 
@@ -34,68 +34,22 @@ Requires **Python ≥ 3.11**. Core dependencies (`botorch`, `gpytorch`, `nump
 
 ## 🚀 Quick‑start
 
-### States and Surrogates
+Take a look at the examples directory and sub-directories within:
 
-```python
-import numpy as np
+* *test_executables*: simple (fortran90 and C++) examples implemented for the test suite.
+* *loops*: example scripts which use `mille‑feuille` to perform sampling, learning and optimisation tasks. This example includes a template for a simulator with namelist based input and scheduling within a PBS environment.
 
-from scipy.stats.qmc import LatinHypercube
+## Core components
 
-from botorch.acquisition import qUpperConfidenceBound
+### Domains, States and Surrogates
 
-from millefeuille.domain import InputDomain
-from millefeuille.state import State
-from millefeuille.surrogate import SingleFidelityGPSurrogate
-from millefeuille.optimise import suggest_next_locations
-from millefeuille.initialise import generate_initial_sample
+`mille‑feuille` implements the following containers:
 
-# 1. Problem setup ----------------------------------------------------------
-domain = InputDomain(
-    dim=2,
-    b_low=np.array([-5.0, -5.0]),
-    b_up=np.array([5.0, 5.0]),
-    steps=np.array([0.0, 0.0])   # both dims continuous
-)
+1. *InputDomain* holds the bounded input domain which can be a mix of continuous and discrete dimension
+2. *FidelityDomain* holds information regarding the degrees of simulation fidelity.
+3. *State* holds the necessary data taken from simulation samples: indices (Is), inputs (Xs), output parameters (Ps), fidelities (Ss) and objectives (Ys)
 
-# Function to be maximised
-def f_optim(x):
-    return -np.vecdot(x,x,axis=1)
-
-# 2. Create initial training data -------------------------------------------
-
-# Initial random sampling
-nsims = 10
-sampler = LatinHypercube(domain.dim)
-index = np.arange(nsims,dtype=int)
-Xs, _ = generate_initial_sample(domain,sampler,nsims)
-Ys = f_optim(Xs)
-
-# 3. Set up mille-feuille state & surrogate ---------------------------------
-# Package into millefeuille State
-state = State(
-	input_domain=domain,
-	index=index,
-	Xs=Xs,
-	Ys=Ys
-)
-
-# Create surrogate model based on state
-surrogate = SingleFidelityGPSurrogate()
-surrogate.fit(state)
-
-# 4. Optimiser call ---------------------------------------------------------
-# Use botorch acquistion functions
-acq_function = qUpperConfidenceBound(surrogate.model,beta=0.5)
-
-X_next = suggest_next_locations(
-    batch_size=2,
-    state=state,
-    acq_function=acq_function
-)
-print(X_next)    # candidate points in original scale
-```
-
-Plug in your own simulator to evaluate `X_next`, update the `State`, and repeat.
+These classes hold the necessary information to train surrogate models. `mille‑feuille` has a number of abstract base classes as well as concrete examples of surrogate models including Gaussian Processes (using GPyTorch and BOTorch) and Neural Network Ensembles (using PyTorch and BOTorch).
 
 ### Simulators and Schedulers
 
@@ -106,26 +60,7 @@ Plug in your own simulator to evaluate `X_next`, update the `State`, and repeat.
 3. The simulator writes output files which must be post-processed to extract useful information (P) and the objective function value (Y)
 4. (Optionally) A clean up of the Simulator and Schedular output files is performed
 
-Take a look at the simple (fortran90 and C++) examples implemented in the test suite in `conftest.py` and /tests/test_exe/. The C++ example makes use of the [nlohmann JSON](https://github.com/nlohmann/json) header file.
-
----
-
-## 🤝 Relationship to BoTorch
-
-`mille‑feuille` is *additive*: all optimisation is delegated to BoTorch. What we provide is
-
-- **Thin wrappers** around BoTorch models so you can swap simulators and surrogates without touching the optimiser loop.
-- **Surrogate model templates** providing a more structured way of introducing GPyTorch and pure PyTorch based models as surrogates.
-- **State and simulator bookkeeping** streamlining the interaction between HPC codes and BO.
-
-When you need full flexibility you can always drop down and call BoTorch directly.
-
----
-
-## 🛠️ Roadmap / work in progress
-
-- **Schedulers** – reference Slurm & PBS implementations.
-- **Multi-Fidelity** - more complete multi-fidelity treatment.
+Take a look at the examples and the tests to see implementations of Simulators and Schedulers.
 
 ---
 

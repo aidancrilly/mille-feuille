@@ -1,0 +1,9 @@
+{
+    "params" : {
+        "names" : ["picket_power","foot_power","main_pulse_delay","foot_time","rise_time","outer_radius","shell_thickness","ice_thickness"],
+        "lower_bounds" : [0.0  ,     0.0, 50e-12, 50e-12, 50e-12, 400e-6,  2e-6, 10e-6],
+        "upper_bounds" : [25e12, 12.5e12,   1e-9,  1e-9,    1e-9, 650e-6, 20e-6, 100e-6],
+        "steps" : [0.0, 0.0, 0.0, 0.0, 0.0, 1.0e-6, 0.5e-6, 0.5e-6]
+    }
+
+}
