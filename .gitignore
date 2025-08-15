@@ -3,6 +3,7 @@ build/
 *.egg
 
 __pycache__/
+.vscode/
 
 *.obj
 *.pdb
@@ -10,4 +11,4 @@ __pycache__/
 
 *.pth
 
-tests/test_exe/nlohmann
+**/nlohmann
