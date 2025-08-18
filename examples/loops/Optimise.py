@@ -12,7 +12,7 @@ if __name__ == "__main__":
     training_file = "Learning_DB.csv"
     output_file = "Optimise_DB.csv"
 
-    # Chimera execution
+    # Execution
     base_paths = {
         "exe": f"{EXECUTABLE}",
         "run_dir": "./runs/",
