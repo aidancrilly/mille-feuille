@@ -31,7 +31,7 @@ if __name__ == "__main__":
     base_paths = {
         "exe": f"{EXECUTABLE}",
         "run_dir": "./runs/",
-        "input": "./input_base.f90",
+        "input": "./input_base.nml",
         "inputs_dir": "./input_decks/",
     }
     io_params = {}
