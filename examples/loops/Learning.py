@@ -97,7 +97,7 @@ if __name__ == "__main__":
         X_next = X_mask[np.random.choice(X_mask.shape[0], size=Nbatch, replace=False), :]
         index_next = current_iter + np.arange(Nbatch) + 1
 
-        # Run batches of Chimera
+        # Run batches of simulator
         P_next, Y_next = batched_simulator(index_next, X_next, scheduler)
 
         state.update(index_next, X_next, Y_next, P_next=P_next)
