@@ -105,7 +105,7 @@ def test_singlefidelity_mean_module_GP(singlefidelitysample, testXs):
     error_surrogate = SingleFidelityGPSurrogate()
     error_surrogate.init_GP_model(state)
     # Check error is raised when don't use mean module
-    with pytest.raises(Exception) as _:  # noqa
+    with pytest.raises(Exception) as _:
         error_surrogate.load("test.pth", eval=True)
 
     second_surrogate = SingleFidelityGPSurrogate()
