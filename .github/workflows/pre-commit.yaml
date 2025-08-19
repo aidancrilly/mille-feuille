@@ -2,87 +2,18 @@ name: Code linting
 
 on:
   pull_request:
+
   push:
     branches:
       - main
-    branches-ignore:
-      - pre-commit-fixes/*   # avoid infinite loops from the auto-fix branch
-  workflow_dispatch:
-
-permissions:
-  contents: write        # needed to push a branch
-  pull-requests: write   # needed to open a PR
 
 jobs:
   pre-commit:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v5
+      with:
           python-version-file: "pyproject.toml"
-      # This will exit non-zero if any hook fails (including auto-fixable ones),
-      # intentionally causing the job to fail.
-      - name: Run pre-commit
-        uses: pre-commit/action@v3.0.1
-
-  create-fix-pr:
-    name: Create PR with auto-fixes
-    runs-on: ubuntu-latest
-    needs: pre-commit
-    # Only run if the lint job failed, and only for direct pushes to main.
-    if: >
-      needs.pre-commit.result == 'failure' &&
-      github.event_name == 'push' &&
-      github.ref == 'refs/heads/main'
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version-file: "pyproject.toml"
-
-      # Run pre-commit again to apply the same fixes locally in this job.
-      - name: Apply pre-commit fixes
-        run: |
-          pip install pre-commit
-          pre-commit install
-          pre-commit run --all-files || true
-
-      - name: Check for changes
-        id: diff
-        run: |
-          if git status --porcelain | grep .; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Create fix branch
-        if: steps.diff.outputs.changed == 'true'
-        run: |
-          BRANCH="pre-commit-fixes/${GITHUB_RUN_ID}"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout -b "$BRANCH"
-          git add -A
-          git commit -m "chore(pre-commit): auto-fix lint issues"
-          git push --set-upstream origin "$BRANCH"
-          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
-
-      - name: Open PR
-        if: steps.diff.outputs.changed == 'true'
-        uses: peter-evans/create-pull-request@v6
-        with:
-          title: "chore(pre-commit): auto-fix lint issues"
-          body: |
-            This PR was created automatically because pre-commit checks failed on `main`.
-            It contains auto-fixes produced by running the same hooks.
-          branch: ${{ steps.create_fix_branch.outputs.branch || '' }}
-          base: main
-          labels: |
-            automated
-            pre-commit
+    - uses: pre-commit/action@v3.0.1
