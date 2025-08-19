@@ -204,7 +204,7 @@ class SingleFidelityGPSurrogate(BaseGPSurrogate):
 
 
 class MultiFidelityGPSurrogate(BaseGPSurrogate):
-    def init(self, state):
+    def init_GP_model(self, state):
         X_torch, Y_torch = self.get_XY(state)
 
         self.likelihood = GaussianLikelihood(noise_constraint=Interval(*self.noise_interval))
@@ -216,7 +216,7 @@ class MultiFidelityGPSurrogate(BaseGPSurrogate):
         self.update_state_dicts()
 
     def fit(self, state: State, approx_mll=False, **kwargs):
-        self.init(state, **kwargs)
+        self.init_GP_model(state, **kwargs)
 
         mll = ExactMarginalLogLikelihood(self.model.likelihood, self.model)
 

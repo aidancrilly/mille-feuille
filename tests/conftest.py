@@ -3,14 +3,16 @@ import torch
 from gpytorch.means import Mean
 from millefeuille.domain import InputDomain
 from millefeuille.simulator import PythonSimulator
+from scipy.stats import qmc
 
 TEST_NUM_RESTARTS = 1
 TEST_RAW_SAMPLES = 32
 
-sampler = np.random.default_rng(seed=12345)
-
+_rng = np.random.default_rng(seed=12345)
 
 ForresterDomain = InputDomain(dim=1, b_low=np.array([0.0]), b_up=np.array([1.0]), steps=np.array([0.0]))
+
+ForresterSampler = qmc.LatinHypercube(ForresterDomain.dim, rng=_rng)
 
 
 class PythonForresterFunction(PythonSimulator):
@@ -74,3 +76,19 @@ class LowFidelityForresterMean(Mean):
         Y = -(A * self.f(Xs) + B * (Xs - 0.5) + C) + self.raw_constant
         Y = self.output_transform.transform(Y).squeeze(-1) if self.output_transform is not None else Y.squeeze(-1)
         return Y
+
+
+class Uniform(qmc.QMCEngine):
+    def __init__(self, d, rng=None):
+        super().__init__(d=d, seed=rng)
+
+    def _random(self, n=1, *, workers=1):
+        return self.rng.random((n, self.d))
+
+    def reset(self):
+        super().__init__(d=self.d, seed=self.rng_seed)
+        return self
+
+    def fast_forward(self, n):
+        self.random(n)
+        return self

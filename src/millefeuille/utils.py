@@ -11,7 +11,15 @@ Defines some useful utility functions which do not fit into the defined classes
 
 
 def probabilistic_threshold_sampling(
-    domain, state, sampler, surrogate, initial_samples, threshold_value, target_key=None, random_draws=None
+    domain,
+    state,
+    sampler,
+    surrogate,
+    initial_samples,
+    threshold_value,
+    target_fidelity=None,
+    target_key=None,
+    random_draws=None,
 ):
     """
     Samples points using a GP surrogate and filters them probabilistically
@@ -24,6 +32,7 @@ def probabilistic_threshold_sampling(
         surrogate: mille-feuille-compatible surrogate (must support predict(domain, X))
         initial_samples: number of samples to draw
         threshold_value: threshold value to compare against
+        target_fidelity: int — selects surrogate fidelity
         target_key: int or str — selects surrogate output
         random_draws: optional np.ndarray of uniform(0,1) values of shape (initial_samples,)
                       if None, will be generated internally
@@ -44,9 +53,13 @@ def probabilistic_threshold_sampling(
     if target_key is not None:
         prediction = predictions[target_key]
     else:
-        if "mean" not in predictions.keys():
-            prediction = predictions[predictions.keys()[0]]
+        if target_fidelity is not None:
+            prediction = predictions[target_fidelity]
         else:
+            if "mean" not in predictions.keys():
+                raise ValueError(
+                    "mean missing from predictions.keys(), did you miss target_fidelity or target_key inputs?"
+                )
             prediction = predictions
 
     mean, std = prediction["mean"], prediction["std"]
@@ -67,7 +80,7 @@ def probabilistic_threshold_sampling(
 
 
 def surrogate_threshold_sampling(
-    domain, state, sampler, surrogate, initial_samples, surrogate_threshold, target_key=None
+    domain, state, sampler, surrogate, initial_samples, surrogate_threshold, target_fidelity=None, target_key=None
 ):
     """
     Draws samples from the sampler, evaluates the surrogate model,
@@ -80,6 +93,7 @@ def surrogate_threshold_sampling(
         surrogate: mille-feuille-style surrogate with .predict(domain, Xs) method
         initial_samples: int, number of candidate points
         surrogate_threshold: float, threshold to apply on predicted mean
+        target_fidelity: int — selects surrogate fidelity
         target_key: int or str — selects surrogate output
 
     Returns:
@@ -97,9 +111,13 @@ def surrogate_threshold_sampling(
     if target_key is not None:
         prediction = predictions[target_key]
     else:
-        if "mean" not in predictions.keys():
-            prediction = predictions[predictions.keys()[0]]
+        if target_fidelity is not None:
+            prediction = predictions[target_fidelity]
         else:
+            if "mean" not in predictions.keys():
+                raise ValueError(
+                    "mean missing from predictions.keys(), did you miss target_fidelity or target_key inputs?"
+                )
             prediction = predictions
 
     mean = prediction["mean"]
