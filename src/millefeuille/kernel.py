@@ -20,16 +20,11 @@ from torch import Tensor
 class ModifiedSingleTaskMultiFidelityGP(SingleTaskGP):
     r"""A single task multi-fidelity GP model.
 
-    A SingleTaskGP model using a DownsamplingKernel for the data fidelity
-    parameter (if present) and an ExponentialDecayKernel for the iteration
-    fidelity parameter (if present).
+    A SingleTaskGP model using a DownsamplingKernel for the fidelity
+    parameter.
 
     This kernel is described in [Wu2019mf]_.
 
-    Example:
-        >>> train_X = torch.rand(20, 4)
-        >>> train_Y = train_X.pow(2).sum(dim=-1, keepdim=True)
-        >>> model = SingleTaskMultiFidelityGP(train_X, train_Y, data_fidelities=[3])
     """
 
     def __init__(

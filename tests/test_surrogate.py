@@ -12,7 +12,7 @@ from millefeuille.initialise import generate_initial_sample
 from millefeuille.state import State
 from millefeuille.surrogate import BasePyTorchModel, SingleFidelityEnsembleSurrogate, SingleFidelityGPSurrogate
 
-from .conftest import ForresterDomain, LowFidelityForresterMean, PythonForresterFunction, sampler
+from .conftest import ForresterDomain, ForresterSampler, LowFidelityForresterMean, PythonForresterFunction
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 dtype = torch.double
@@ -26,7 +26,7 @@ def ntrain(request):
 @pytest_cases.fixture()
 def singlefidelitysample(ntrain):
     Is = np.arange(ntrain)
-    Xs, _ = generate_initial_sample(ForresterDomain, sampler, ntrain)
+    Xs, _ = generate_initial_sample(ForresterDomain, ForresterSampler, ntrain)
     f = PythonForresterFunction()
     _, Ys = f(Is, Xs)
     return Is, Xs, Ys
@@ -39,7 +39,7 @@ def ntest(request):
 
 @pytest_cases.fixture()
 def testXs(ntest):
-    Xs, _ = generate_initial_sample(ForresterDomain, sampler, ntest)
+    Xs, _ = generate_initial_sample(ForresterDomain, ForresterSampler, ntest)
     return Xs
 
 
@@ -163,7 +163,7 @@ def test_singlefidelity_NNEnsemble(testXs):
     ensemble_size = 10
 
     Is = np.arange(ntrain_NN)
-    Xs, _ = generate_initial_sample(ForresterDomain, sampler, ntrain_NN)
+    Xs, _ = generate_initial_sample(ForresterDomain, ForresterSampler, ntrain_NN)
     f = PythonForresterFunction()
     _, Ys = f(Is, Xs)
 

@@ -62,11 +62,11 @@ class FidelityDomain:
     """
 
     num_fidelities: int
-    costs: None | list
+    costs: None | list = None
 
     def __post_init__(self):
         if self.costs is None:
-            self.costs = [i for i in range(self.num_fidelities)]
+            self.costs = [1.0 for _ in range(self.num_fidelities)]
         else:
             assert len(self.costs) == self.num_fidelities
 

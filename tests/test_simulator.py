@@ -8,8 +8,8 @@ from millefeuille.initialise import generate_initial_sample
 
 from .conftest import (
     ForresterDomain,
+    ForresterSampler,
     PythonForresterFunction,
-    sampler,
 )
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "../examples/test_executables/"))
@@ -28,7 +28,7 @@ def nsample(request):
 @pytest_cases.fixture(params=[0.2, 0.5])
 def multifidelitysample(nsample, request):
     Is = np.arange(nsample)
-    Xs, _ = generate_initial_sample(ForresterDomain, sampler, nsample)
+    Xs, _ = generate_initial_sample(ForresterDomain, ForresterSampler, nsample)
     f = PythonForresterFunction()
     Ss = np.random.binomial(1, request.param, size=nsample).reshape(-1, 1)
     _, Ys = f(Is, Xs, Ss)
