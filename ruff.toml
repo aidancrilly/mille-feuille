@@ -35,6 +35,7 @@ ignore = [
     "UP006", # tuple, dict instead of Tuple, Dict
     "UP015", # Unnecessary mode argument in open
     "UP035", # typing.Tuple/Dict deprecated
+    "PT011", # `pytest.raises(ValueError)` is too broad, set the `match` parameter or use a more specific exception
     "PT018", # Assertion should be broken down into multiple parts
 ]
 
