@@ -15,13 +15,14 @@ def generate_batch(
     num_restarts,
     raw_samples,
     optimizer_options,
+    fixed_features=None,
 ):
     # Generate new candidates
     if state.l_MultiFidelity:
         X_next, _ = optimize_acqf_mixed(
             acq_function=acq_function,
             bounds=state.get_bounds(),
-            fixed_features_list=state.fidelity_features,
+            fixed_features_list=[fixed_features],
             q=batch_size,
             num_restarts=num_restarts,
             raw_samples=raw_samples,
@@ -31,6 +32,7 @@ def generate_batch(
         X_next, _ = optimize_acqf(
             acq_function,
             bounds=state.get_bounds(),
+            fixed_features=fixed_features,
             q=batch_size,
             num_restarts=num_restarts,
             raw_samples=raw_samples,
@@ -48,6 +50,7 @@ def suggest_next_locations(
     raw_samples=DEFAULT_RAW_SAMPLES,
     optimizer_options=None,
     verbose=False,
+    fixed_features=None,
 ):
     # Check inputs
     assert isinstance(state, State)
@@ -64,6 +67,7 @@ def suggest_next_locations(
         num_restarts=num_restarts,
         raw_samples=raw_samples,
         optimizer_options=optimizer_options,
+        fixed_features=fixed_features,
     )
 
     if verbose:
