@@ -138,7 +138,6 @@ def run_Bayesian_optimiser(
     scheduler=None,
     csv_name=None,
     verbose=False,
-    fixed_features=None,
     **kwargs,
 ):
     if isinstance(simulator, ExectuableSimulator) and scheduler is None:
@@ -152,10 +151,10 @@ def run_Bayesian_optimiser(
 
         if state.l_MultiFidelity:
             X_next, S_next = suggest_next_locations(
-                batch_size, state, acq_function=acq_function, verbose=verbose, fixed_features=fixed_features, **kwargs
+                batch_size, state, acq_function=acq_function, verbose=verbose, **kwargs
             )
         else:
-            X_next = suggest_next_locations(batch_size, state, acq_function=acq_function, verbose=verbose, fixed_features=fixed_features, **kwargs)
+            X_next = suggest_next_locations(batch_size, state, acq_function=acq_function, verbose=verbose, **kwargs)
             S_next = None
 
         index_next = state.index[-1] + np.arange(batch_size) + 1
