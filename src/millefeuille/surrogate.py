@@ -9,11 +9,18 @@ import torch.nn as nn
 from botorch.fit import fit_gpytorch_mll
 from botorch.models import SingleTaskGP
 from botorch.models.ensemble import EnsembleModel
+from botorch.models.transforms.input import InputTransform
+from botorch.models.transforms.outcome import OutcomeTransform
+from botorch.utils.types import DEFAULT, _DefaultType
 from gpytorch.constraints import Interval
+from gpytorch.distributions.multivariate_normal import MultivariateNormal
 from gpytorch.kernels import MaternKernel, ScaleKernel
 from gpytorch.likelihoods import GaussianLikelihood
+from gpytorch.likelihoods.likelihood import Likelihood
+from gpytorch.means.mean import Mean
 from gpytorch.mlls import ExactMarginalLogLikelihood
 from gpytorch.module import Module
+from gpytorch.utils.grid import ScaleToBounds
 from torch import Tensor
 from torch.utils.data import DataLoader, TensorDataset, random_split
 
@@ -233,6 +240,119 @@ class MultiFidelityGPSurrogate(BaseGPSurrogate):
             std = np.sqrt(var)
         mean, std = state.inverse_transform_Y(mean, std)
         return {fid: {"mean": mean[:, fid], "std": std[:, fid]} for fid in range(state.fidelity_domain.num_fidelities)}
+
+
+class SingleTaskDeepKernelGP(SingleTaskGP):
+    def __init__(
+        self,
+        train_X: Tensor,
+        train_Y: Tensor,
+        deep_kernel: nn.Module,
+        train_Yvar: Tensor | None = None,
+        likelihood: Likelihood | None = None,
+        covar_module: Module | None = None,
+        mean_module: Mean | None = None,
+        outcome_transform: OutcomeTransform | _DefaultType | None = DEFAULT,
+        input_transform: InputTransform | None = None,
+    ):
+        super().__init__(
+            train_X, train_Y, train_Yvar, likelihood, covar_module, mean_module, outcome_transform, input_transform
+        )
+
+        self.deep_kernel = deep_kernel
+
+        self.scale_to_bounds = ScaleToBounds(0.0, 1.0)
+
+    def forward(self, x):
+        if self.training:
+            x = self.transform_inputs(x)
+        u = self.scale_to_bounds(self.deep_kernel(x))
+        mean_u = self.mean_module(u)
+        covar_u = self.covar_module(u)
+        return MultivariateNormal(mean_u, covar_u)
+
+
+class DeepKernelOptimiser:
+    def __init__(self, optimiser_method, num_epochs, learning_rate, verbose=False, print_iterations=10):
+        self.optimiser_method = optimiser_method
+        self.num_epochs = num_epochs
+        self.lr = learning_rate
+        self.verbose = verbose
+        self.print_iterations = print_iterations
+
+    def initialise(self, parameters):
+        self.optimizer = self.optimiser_method([{"params": parameters}], lr=self.lr)
+
+    def training_loop(self, model, mll, train_X):
+        for epoch in range(self.num_epochs):
+            # clear gradients
+            self.optimizer.zero_grad()
+            # forward pass through the model to obtain the output MultivariateNormal
+            output = model(train_X)
+            # Compute negative marginal log likelihood
+            loss = -mll(output, model.train_targets)
+            # back prop gradients
+            loss.backward()
+            # Print
+            if (epoch + 1) % self.print_iterations == 0 and self.verbose:
+                print(
+                    f"Epoch {epoch + 1:>3}/{self.num_epochs} - Loss: {loss.item():>4.3f} "
+                    f"lengthscale: {model.covar_module.base_kernel.lengthscale.item():>4.3f} "
+                    f"noise: {model.likelihood.noise.item():>4.3f}"
+                )
+            self.optimizer.step()
+
+
+class SingleFidelityDeepKernelGPSurrogate(BaseGPSurrogate):
+    def init_GP_model(
+        self,
+        state: State,
+        deep_kernel: nn.Module,
+    ):
+        X_torch, Y_torch = self.get_XY(state)
+
+        self.deep_kernel = deep_kernel
+
+        self.likelihood = GaussianLikelihood(noise_constraint=Interval(*self.noise_interval))
+
+        covar_module = ScaleKernel(
+            MaternKernel(nu=2.5, ard_num_dims=state.dim, lengthscale_constraint=Interval(*self.lengthscale_interval))
+        )
+
+        self.model = SingleTaskDeepKernelGP(
+            X_torch, Y_torch, covar_module=covar_module, likelihood=self.likelihood, deep_kernel=self.deep_kernel
+        )
+
+        self.update_state_dicts()
+
+    def fit(self, state: State, deep_kernel: nn.Module, optimiser: DeepKernelOptimiser):
+        # Following https://botorch.org/docs/tutorials/fit_model_with_torch_optimizer/
+        self.init_GP_model(state, deep_kernel)
+
+        mll = ExactMarginalLogLikelihood(self.model.likelihood, self.model)
+        # set mll and all submodules to the specified dtype and device
+        mll = mll.to(dtype=dtype, device=device)
+
+        # Fit the model
+        X_torch, _ = self.get_XY(state)
+        train_X = X_torch
+
+        optimiser.initialise(self.model.parameters())
+
+        self.model.train()
+        optimiser.training_loop(self.model, mll, train_X)
+        self.model.eval()
+
+    def predict(self, state: State, Xs):
+        Xs_unit = state.transform_X(Xs)
+        test_X = torch.tensor(Xs_unit, dtype=torch.double, device=device)
+        with torch.no_grad():
+            post = self.likelihood(self.model(test_X))
+            mean = post.mean.cpu().numpy().reshape(-1, 1)
+            var = post.variance.cpu().numpy().reshape(-1, 1)
+            std = np.sqrt(var)
+        mean, std = state.inverse_transform_Y(mean, std)
+        return {"mean": mean, "std": std}
 
 
 ##################################################

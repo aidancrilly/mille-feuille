@@ -8,9 +8,16 @@ import pytest_cases
 import torch
 import torch.nn as nn
 from botorch.exceptions.warnings import OptimizationWarning
+from millefeuille.domain import InputDomain
 from millefeuille.initialise import generate_initial_sample
 from millefeuille.state import State
-from millefeuille.surrogate import BasePyTorchModel, SingleFidelityEnsembleSurrogate, SingleFidelityGPSurrogate
+from millefeuille.surrogate import (
+    BasePyTorchModel,
+    DeepKernelOptimiser,
+    SingleFidelityDeepKernelGPSurrogate,
+    SingleFidelityEnsembleSurrogate,
+    SingleFidelityGPSurrogate,
+)
 
 from .conftest import ForresterDomain, ForresterSampler, LowFidelityForresterMean, PythonForresterFunction
 
@@ -195,3 +202,47 @@ def test_singlefidelity_NNEnsemble(testXs):
     assert np.isclose(testYs["std"], second_testYs["std"]).all(), (
         "Std. dev. predictions diverged between saved and loaded surrogate model"
     )
+
+
+@pytest.mark.unit
+def test_singlefidelity_deepkernel():
+    Npts = 20
+    Xs = np.linspace(-1.0, 1.0, Npts)
+    Ys = np.heaviside(Xs, 0.0)
+
+    input_domain = InputDomain(dim=1, b_low=np.array([-1.0]), b_up=np.array([1.0]), steps=np.array([0.0]))
+
+    state = State(input_domain, np.arange(Npts), Xs, Ys)
+
+    normal_surrogate = SingleFidelityGPSurrogate(noise_interval=(1e-8, 1.0))
+
+    normal_surrogate.fit(state)
+
+    deep_kernel_surrogate = SingleFidelityDeepKernelGPSurrogate(noise_interval=(1e-8, 1.0))
+
+    deep_kernel = nn.Sequential(
+        nn.Linear(1, 32, dtype=dtype, device=device),
+        nn.Tanh(),
+        nn.Linear(32, 32, dtype=dtype, device=device),
+        nn.Tanh(),
+        nn.Linear(32, 1, dtype=dtype, device=device),
+    )
+
+    from torch.optim import Adam
+
+    optimiser = DeepKernelOptimiser(optimiser_method=Adam, num_epochs=200, learning_rate=0.025, verbose=True)
+
+    deep_kernel_surrogate.fit(state, deep_kernel, optimiser)
+
+    assert normal_surrogate.model.likelihood.noise.item() > deep_kernel_surrogate.model.likelihood.noise.item(), (
+        "Deep kernel GP should learn lower noise on Heaviside data set..."
+    )
+
+    X_test = np.linspace(-1.0, 1.0, 100)
+    y_pred_NS = normal_surrogate.predict(state, X_test.reshape(-1, 1))
+    y_pred_DS = deep_kernel_surrogate.predict(state, X_test.reshape(-1, 1))
+    y_truth = np.heaviside(X_test, 0.0)
+
+    assert np.sum((y_truth - y_pred_NS["mean"].flatten()) ** 2) > np.sum(
+        (y_truth - y_pred_DS["mean"].flatten()) ** 2
+    ), "Deep kernel GP should learn lower MSE on Heaviside data set..."
