@@ -8,6 +8,10 @@
 
 > **Status:** early days – very much a work in progress
 
+Used in the following publications:
+
+- [Automated simulation-based design via multi-fidelity active learning and optimisation for laser direct drive implosions, Crilly et al.](https://arxiv.org/abs/2508.20878)
+
 ---
 
 ## 🔧 Install
