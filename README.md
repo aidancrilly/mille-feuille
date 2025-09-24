@@ -20,13 +20,13 @@ Pip:
 
 ```bash
 # Development head
-pip install git+https://github.com/aidancrilly/mille-feuille.git
+pip install git+https://github.com/Pmoloney3415/mille-feuille.git
 ```
 
 Or clone repo and install dev environment:
 
 ```bash
-git clone https://github.com/aidancrilly/mille-feuille.git
+git clone https://github.com/Pmoloney3415/mille-feuille.git
 cd mille-feuille
 pip install -e .[dev]
 python dev_fetch_deps.py # Grabs header file needed by C++ test script
