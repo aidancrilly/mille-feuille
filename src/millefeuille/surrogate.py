@@ -8,9 +8,10 @@ import torch
 import torch.nn as nn
 from botorch.fit import fit_gpytorch_mll
 from botorch.models import SingleTaskGP
+from botorch.models.multitask import MultiTaskGP
 from botorch.models.ensemble import EnsembleModel
 from gpytorch.constraints import Interval
-from gpytorch.kernels import MaternKernel, ScaleKernel
+from gpytorch.kernels import RBFKernel, MaternKernel, ScaleKernel, SpectralMixtureKernel
 from gpytorch.likelihoods import GaussianLikelihood
 from gpytorch.mlls import ExactMarginalLogLikelihood
 from gpytorch.module import Module
@@ -163,14 +164,38 @@ class SingleFidelityGPSurrogate(BaseGPSurrogate):
         self,
         state: State,
         mean_module: Module | None = None,
+        kernel_type="Matern", # "RBF", "Matern", "SpectralMixture"
+        nu=2.5, # For Matern kernel
+        lengthscale_prior=None,
+        outputscale_prior=None,
+        ard=True, # Anisotropic kernel?
+        num_mixtures=4, # For Spectral Mixture Kernel
         **kwargs,
     ):
         X_torch, Y_torch = self.get_XY(state)
 
+        # Set the noise contstraints
         self.likelihood = GaussianLikelihood(noise_constraint=Interval(*self.noise_interval))
-        covar_module = ScaleKernel(
-            MaternKernel(nu=2.5, ard_num_dims=state.dim, lengthscale_constraint=Interval(*self.lengthscale_interval))
-        )
+        
+        # Choose the kernel type
+        d = state.dim
+        kernel_type_lower = kernel_type.lower()
+        if kernel_type_lower == "rbf":
+            base_kernel = RBFKernel(ard_num_dims=d if ard else None,
+                lengthscale_prior=lengthscale_prior)
+        elif kernel_type_lower == "matern":
+            base_kernel = MaternKernel(nu=nu,
+                ard_num_dims=d if ard else None,
+                lengthscale_prior=lengthscale_prior)
+        elif kernel_type_lower == "spectralmixture":
+            base_kernel = SpectralMixtureKernel(num_mixtures=num_mixtures,
+                ard_num_dims=d if ard else None)
+        else:
+            raise ValueError(f"Unsupported kernel_type: {kernel_type}")
+        
+        # Set the covariance module
+        covar_module = ScaleKernel(base_kernel, outputscale_prior=outputscale_prior)
+        
         self.mean_module = mean_module
         self.model = SingleTaskGP(
             X_torch,
@@ -183,56 +208,126 @@ class SingleFidelityGPSurrogate(BaseGPSurrogate):
 
         self.update_state_dicts()
 
-    def fit(self, state: State, approx_mll=False, **kwargs):
+    def fit(self, state: State, max_retries=3, approx_mll=False, **kwargs):
         self.init_GP_model(state, self.mean_module, **kwargs)
 
         mll = ExactMarginalLogLikelihood(self.model.likelihood, self.model)
 
-        # Fit the model
-        fit_gpytorch_mll(mll, approx_mll=approx_mll)
+        # Fit the model - several attempts in case of failure
+        for attempt in range(max_retries):
+            try:
+                fit_gpytorch_mll(mll, approx_mll=approx_mll)
+                break
+            except RuntimeError as e:
+                print(f"Fitting failed (attempt {attempt+1}), retrying… {e}")
 
     def predict(self, state: State, Xs):
+        
+        # Get transformed model inputs on the device
         Xs_unit = state.transform_X(Xs)
         test_X = torch.tensor(Xs_unit, dtype=torch.double, device=device)
+        
+        # Switch to evaluation mode for predictions
+        self.eval()
+        
+        # Get predictions, from model posterior, not likelhood
+        # Likelehood adds fitted noise to the predictions, which we probably don't want for threshold sampling etc.
         with torch.no_grad():
-            post = self.likelihood(self.model(test_X))
+            #post = self.likelihood(self.model(test_X))
+            post = self.model.posterior(test_X)
             mean = post.mean.cpu().numpy().reshape(-1, 1)
             var = post.variance.cpu().numpy().reshape(-1, 1)
             std = np.sqrt(var)
+        
+        # Get the predictions in unormalised space
         mean, std = state.inverse_transform_Y(mean, std)
         return {"mean": mean, "std": std}
 
 
 class MultiFidelityGPSurrogate(BaseGPSurrogate):
-    def init_GP_model(self, state):
+    def init_GP_model(
+        self,
+        state: State,
+        kernel_type="Matern", # "RBF", "Matern", "SpectralMixture"
+        nu=2.5, # For Matern kernel
+        lengthscale_prior=None,
+        outputscale_prior=None,
+        ard=True, # Anisotropic kernel?
+        num_mixtures=4, # For Spectral Mixture Kernel
+        **kwargs,
+    ):
         X_torch, Y_torch = self.get_XY(state)
 
+        # Set the noise contstraints
         self.likelihood = GaussianLikelihood(noise_constraint=Interval(*self.noise_interval))
 
-        self.model = ModifiedSingleTaskMultiFidelityGP(
-            X_torch, Y_torch, likelihood=self.likelihood, outcome_transform=None
+        # Choose the kernel type
+        d = state.dim
+        kernel_type_lower = kernel_type.lower()
+        if kernel_type_lower == "rbf":
+            base_kernel = RBFKernel(ard_num_dims=d if ard else None,
+                lengthscale_prior=lengthscale_prior)
+        elif kernel_type_lower == "matern":
+            base_kernel = MaternKernel(nu=nu,
+                ard_num_dims=d if ard else None,
+                lengthscale_prior=lengthscale_prior)
+        elif kernel_type_lower == "spectralmixture":
+            print(" Warning! Spectral Mixture Kernel not fully tested for Multi-Fidelity GP.")
+            base_kernel = SpectralMixtureKernel(num_mixtures=num_mixtures,
+                ard_num_dims=d if ard else None)
+        else:
+            raise ValueError(f"Unsupported kernel_type: {kernel_type}")
+
+        # Set the covariance module
+        covar_module = ScaleKernel(base_kernel, outputscale_prior=outputscale_prior)
+        self.model = MultiTaskGP(
+            X_torch,
+            Y_torch,
+            task_feature=-1,
+            covar_module=covar_module,
+            likelihood=self.likelihood,
+            **kwargs,
         )
 
         self.update_state_dicts()
 
-    def fit(self, state: State, approx_mll=False, **kwargs):
+    def fit(self, state: State, approx_mll=False, max_retries=3, **kwargs):
         self.init_GP_model(state, **kwargs)
 
         mll = ExactMarginalLogLikelihood(self.model.likelihood, self.model)
 
         # Fit the model
-        fit_gpytorch_mll(mll, approx_mll=approx_mll)
+        for attempt in range(max_retries):
+            try:
+                fit_gpytorch_mll(mll, approx_mll=approx_mll)
+                break
+            except RuntimeError as e:
+                print(f"Fitting failed (attempt {attempt+1}), retrying... {e}")
 
     def predict(self, state: State, Xs):
-        Xs_unit = state.transform_X(Xs)
+        # Transform inputs -> this duplicates across fidelities
+        Xs_unit = state.transform_X(Xs)  # shape: (N * num_fidelities, d+1), last index of second axis is fidelity
         test_X = torch.tensor(Xs_unit, dtype=torch.double, device=device)
+
         with torch.no_grad():
-            post = self.model.likelihood(self.model(test_X))
-            mean = post.mean.cpu().numpy().reshape(-1, state.fidelity_domain.num_fidelities)
-            var = post.variance.cpu().numpy().reshape(-1, state.fidelity_domain.num_fidelities)
-            std = np.sqrt(var)
+            post = self.model.posterior(test_X)
+            mean = post.mean.cpu().numpy().reshape(-1)
+            std = np.sqrt(post.variance.cpu().numpy().reshape(-1))
+    
+        # Reshape back into (N, num_fidelities)
+        N = Xs.shape[0]
+        F = state.fidelity_domain.num_fidelities
+        mean = mean.reshape(N, F)
+        std = std.reshape(N, F)
+    
+        # Undo normalization
         mean, std = state.inverse_transform_Y(mean, std)
-        return {fid: {"mean": mean[:, fid], "std": std[:, fid]} for fid in range(state.fidelity_domain.num_fidelities)}
+    
+        # Return in same dict format as before
+        return {
+            fid: {"mean": mean[:, fid], "std": std[:, fid]}
+            for fid in range(F)
+        }
 
 
 ##################################################
