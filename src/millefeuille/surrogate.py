@@ -232,7 +232,8 @@ class SingleFidelityGPSurrogate(BaseGPSurrogate):
         # Get predictions, from model posterior, not likelhood
         # Likelehood adds fitted noise to the predictions, which we probably don't want for threshold sampling etc.
         with torch.no_grad():
-            post = self.model.posterior(self.model(test_X))
+            #post = self.likelihood(self.model(test_X))
+            post = self.model.posterior(test_X)
             mean = post.mean.cpu().numpy().reshape(-1, 1)
             var = post.variance.cpu().numpy().reshape(-1, 1)
             std = np.sqrt(var)
