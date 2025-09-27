@@ -68,6 +68,7 @@ def test_singlefidelity_probabilistic_threshold_sampling(singlefidelitysample, i
 
 
 @pytest.mark.unit
+@pytest.mark.filterwarnings("ignore::UserWarning")
 def test_multifidelity_probabilistic_threshold_sampling(multifidelitysample, initial_samples, threshold_value):
     Is, Xs, Ss, Ys = multifidelitysample
 

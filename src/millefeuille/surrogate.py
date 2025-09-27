@@ -8,17 +8,16 @@ import torch
 import torch.nn as nn
 from botorch.fit import fit_gpytorch_mll
 from botorch.models import SingleTaskGP
-from botorch.models.multitask import MultiTaskGP
 from botorch.models.ensemble import EnsembleModel
+from botorch.models.multitask import MultiTaskGP
 from gpytorch.constraints import Interval
-from gpytorch.kernels import RBFKernel, MaternKernel, ScaleKernel, SpectralMixtureKernel
+from gpytorch.kernels import Kernel, RBFKernel, ScaleKernel
 from gpytorch.likelihoods import GaussianLikelihood
 from gpytorch.mlls import ExactMarginalLogLikelihood
 from gpytorch.module import Module
 from torch import Tensor
 from torch.utils.data import DataLoader, TensorDataset, random_split
 
-from .kernel import ModifiedSingleTaskMultiFidelityGP
 from .state import State
 
 """
@@ -100,13 +99,21 @@ class BaseGPSurrogate(BaseSurrogate, ABC):
     Abstract base class for all GP surrogate models in mille-feuille.
     """
 
-    def __init__(self, lengthscale_interval=DEFAULT_LENGTHSCALE_INTERVAL, noise_interval=DEFAULT_NOISE_INTERVAL):
+    def __init__(
+        self,
+        lengthscale_interval=DEFAULT_LENGTHSCALE_INTERVAL,
+        noise_interval=DEFAULT_NOISE_INTERVAL,
+        outputscale_interval=None,
+    ):
         self.model = None
+        self.base_kernel = None
         self.mean_module = None
         self.likelihood = None
         self.state_dicts = None
+        self.initialised = False
         self.noise_interval = noise_interval
         self.lengthscale_interval = lengthscale_interval
+        self.outputscale_interval = outputscale_interval
 
     @abstractmethod
     def init_GP_model(self, state: State):
@@ -164,39 +171,42 @@ class SingleFidelityGPSurrogate(BaseGPSurrogate):
         self,
         state: State,
         mean_module: Module | None = None,
-        kernel_type="Matern", # "RBF", "Matern", "SpectralMixture"
-        nu=2.5, # For Matern kernel
-        lengthscale_prior=None,
-        outputscale_prior=None,
-        ard=True, # Anisotropic kernel?
-        num_mixtures=4, # For Spectral Mixture Kernel
+        kernel: Kernel | None = None,
+        kernel_kwargs: Dict | None = None,
         **kwargs,
     ):
+        # Set up GP model
+        if not self.initialised:
+            # Set the noise constraints
+            self.likelihood = GaussianLikelihood(noise_constraint=Interval(*self.noise_interval))
+
+            self.mean_module = mean_module
+
+            # Choose the kernel type
+            if kernel is not None:
+                assert issubclass(kernel, Kernel), "kernel must be a gpytorch Kernel subclass"
+                if kernel_kwargs is None:
+                    kernel_kwargs = {}
+                self.base_kernel = kernel(**kernel_kwargs, lengthscale_constraint=Interval(*self.lengthscale_interval))
+            else:  # Default to RBF kernel
+                d = state.dim
+                self.base_kernel = RBFKernel(
+                    ard_num_dims=d, lengthscale_constraint=Interval(*self.lengthscale_interval)
+                )
+
+            self.initialised = True
+        else:
+            print("No kernel specified, defaulting to RBFKernel. - NB: occurs if fit is called without init_GP_model")
+
         X_torch, Y_torch = self.get_XY(state)
 
-        # Set the noise contstraints
-        self.likelihood = GaussianLikelihood(noise_constraint=Interval(*self.noise_interval))
-        
-        # Choose the kernel type
-        d = state.dim
-        kernel_type_lower = kernel_type.lower()
-        if kernel_type_lower == "rbf":
-            base_kernel = RBFKernel(ard_num_dims=d if ard else None,
-                lengthscale_prior=lengthscale_prior)
-        elif kernel_type_lower == "matern":
-            base_kernel = MaternKernel(nu=nu,
-                ard_num_dims=d if ard else None,
-                lengthscale_prior=lengthscale_prior)
-        elif kernel_type_lower == "spectralmixture":
-            base_kernel = SpectralMixtureKernel(num_mixtures=num_mixtures,
-                ard_num_dims=d if ard else None)
-        else:
-            raise ValueError(f"Unsupported kernel_type: {kernel_type}")
-        
         # Set the covariance module
-        covar_module = ScaleKernel(base_kernel, outputscale_prior=outputscale_prior)
-        
-        self.mean_module = mean_module
+        if self.outputscale_interval is None:
+            outputscale_constraint = None
+        else:
+            outputscale_constraint = Interval(*self.outputscale_interval)
+        covar_module = ScaleKernel(self.base_kernel, outputscale_constraint=outputscale_constraint)
+
         self.model = SingleTaskGP(
             X_torch,
             Y_torch,
@@ -208,8 +218,8 @@ class SingleFidelityGPSurrogate(BaseGPSurrogate):
 
         self.update_state_dicts()
 
-    def fit(self, state: State, max_retries=3, approx_mll=False, **kwargs):
-        self.init_GP_model(state, self.mean_module, **kwargs)
+    def fit(self, state: State, max_retries=1, approx_mll=False, **kwargs):
+        self.init_GP_model(state, **kwargs)
 
         mll = ExactMarginalLogLikelihood(self.model.likelihood, self.model)
 
@@ -219,26 +229,25 @@ class SingleFidelityGPSurrogate(BaseGPSurrogate):
                 fit_gpytorch_mll(mll, approx_mll=approx_mll)
                 break
             except RuntimeError as e:
-                print(f"Fitting failed (attempt {attempt+1}), retrying… {e}")
+                print(f"Fitting failed (attempt {attempt + 1}), retrying… {e}")
 
     def predict(self, state: State, Xs):
-        
         # Get transformed model inputs on the device
         Xs_unit = state.transform_X(Xs)
         test_X = torch.tensor(Xs_unit, dtype=torch.double, device=device)
-        
+
         # Switch to evaluation mode for predictions
         self.eval()
-        
+
         # Get predictions, from model posterior, not likelhood
         # Likelehood adds fitted noise to the predictions, which we probably don't want for threshold sampling etc.
         with torch.no_grad():
-            #post = self.likelihood(self.model(test_X))
+            # post = self.likelihood(self.model(test_X))
             post = self.model.posterior(test_X)
             mean = post.mean.cpu().numpy().reshape(-1, 1)
             var = post.variance.cpu().numpy().reshape(-1, 1)
             std = np.sqrt(var)
-        
+
         # Get the predictions in unormalised space
         mean, std = state.inverse_transform_Y(mean, std)
         return {"mean": mean, "std": std}
@@ -248,42 +257,49 @@ class MultiFidelityGPSurrogate(BaseGPSurrogate):
     def init_GP_model(
         self,
         state: State,
-        kernel_type="Matern", # "RBF", "Matern", "SpectralMixture"
-        nu=2.5, # For Matern kernel
-        lengthscale_prior=None,
-        outputscale_prior=None,
-        ard=True, # Anisotropic kernel?
-        num_mixtures=4, # For Spectral Mixture Kernel
+        mean_module: Module | None = None,
+        kernel: Kernel | None = None,
+        kernel_kwargs: Dict | None = None,
         **kwargs,
     ):
+        # Set up GP model
+        if not self.initialised:
+            # Set the noise constraints
+            self.likelihood = GaussianLikelihood(noise_constraint=Interval(*self.noise_interval))
+
+            self.mean_module = mean_module
+
+            # Choose the kernel type
+            if kernel is not None:
+                assert issubclass(kernel, Kernel), "kernel must be a gpytorch Kernel subclass"
+                if kernel_kwargs is None:
+                    kernel_kwargs = {}
+                self.base_kernel = kernel(**kernel_kwargs, lengthscale_constraint=Interval(*self.lengthscale_interval))
+            else:  # Default to RBF kernel
+                d = state.dim
+                self.base_kernel = RBFKernel(
+                    ard_num_dims=d, lengthscale_constraint=Interval(*self.lengthscale_interval)
+                )
+                print(
+                    "No kernel specified, defaulting to RBFKernel. - NB: occurs if fit is called without init_GP_model"
+                )
+
+            self.initialised = True
+
         X_torch, Y_torch = self.get_XY(state)
 
-        # Set the noise contstraints
-        self.likelihood = GaussianLikelihood(noise_constraint=Interval(*self.noise_interval))
-
-        # Choose the kernel type
-        d = state.dim
-        kernel_type_lower = kernel_type.lower()
-        if kernel_type_lower == "rbf":
-            base_kernel = RBFKernel(ard_num_dims=d if ard else None,
-                lengthscale_prior=lengthscale_prior)
-        elif kernel_type_lower == "matern":
-            base_kernel = MaternKernel(nu=nu,
-                ard_num_dims=d if ard else None,
-                lengthscale_prior=lengthscale_prior)
-        elif kernel_type_lower == "spectralmixture":
-            print(" Warning! Spectral Mixture Kernel not fully tested for Multi-Fidelity GP.")
-            base_kernel = SpectralMixtureKernel(num_mixtures=num_mixtures,
-                ard_num_dims=d if ard else None)
-        else:
-            raise ValueError(f"Unsupported kernel_type: {kernel_type}")
-
         # Set the covariance module
-        covar_module = ScaleKernel(base_kernel, outputscale_prior=outputscale_prior)
+        if self.outputscale_interval is None:
+            outputscale_constraint = None
+        else:
+            outputscale_constraint = Interval(*self.outputscale_interval)
+        covar_module = ScaleKernel(self.base_kernel, outputscale_constraint=outputscale_constraint)
+
         self.model = MultiTaskGP(
             X_torch,
             Y_torch,
             task_feature=-1,
+            mean_module=self.mean_module,
             covar_module=covar_module,
             likelihood=self.likelihood,
             **kwargs,
@@ -291,7 +307,7 @@ class MultiFidelityGPSurrogate(BaseGPSurrogate):
 
         self.update_state_dicts()
 
-    def fit(self, state: State, approx_mll=False, max_retries=3, **kwargs):
+    def fit(self, state: State, approx_mll=False, max_retries=1, **kwargs):
         self.init_GP_model(state, **kwargs)
 
         mll = ExactMarginalLogLikelihood(self.model.likelihood, self.model)
@@ -302,7 +318,7 @@ class MultiFidelityGPSurrogate(BaseGPSurrogate):
                 fit_gpytorch_mll(mll, approx_mll=approx_mll)
                 break
             except RuntimeError as e:
-                print(f"Fitting failed (attempt {attempt+1}), retrying... {e}")
+                print(f"Fitting failed (attempt {attempt + 1}), retrying... {e}")
 
     def predict(self, state: State, Xs):
         # Transform inputs -> this duplicates across fidelities
@@ -313,21 +329,18 @@ class MultiFidelityGPSurrogate(BaseGPSurrogate):
             post = self.model.posterior(test_X)
             mean = post.mean.cpu().numpy().reshape(-1)
             std = np.sqrt(post.variance.cpu().numpy().reshape(-1))
-    
+
         # Reshape back into (N, num_fidelities)
         N = Xs.shape[0]
         F = state.fidelity_domain.num_fidelities
         mean = mean.reshape(N, F)
         std = std.reshape(N, F)
-    
+
         # Undo normalization
         mean, std = state.inverse_transform_Y(mean, std)
-    
+
         # Return in same dict format as before
-        return {
-            fid: {"mean": mean[:, fid], "std": std[:, fid]}
-            for fid in range(F)
-        }
+        return {fid: {"mean": mean[:, fid], "std": std[:, fid]} for fid in range(F)}
 
 
 ##################################################

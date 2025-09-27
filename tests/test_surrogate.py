@@ -8,6 +8,7 @@ import pytest_cases
 import torch
 import torch.nn as nn
 from botorch.exceptions.warnings import OptimizationWarning
+from gpytorch.kernels import MaternKernel
 from millefeuille.initialise import generate_initial_sample
 from millefeuille.state import State
 from millefeuille.surrogate import BasePyTorchModel, SingleFidelityEnsembleSurrogate, SingleFidelityGPSurrogate
@@ -52,13 +53,14 @@ def test_singlefidelity_GP(singlefidelitysample, testXs):
     state = State(ForresterDomain, Is, Xs, Ys)
 
     surrogate = SingleFidelityGPSurrogate()
+    surrogate.init_GP_model(state, kernel=MaternKernel, kernel_kwargs={"nu": 2.5})
     surrogate.fit(state)
     testYs = surrogate.predict(state, testXs)
 
     surrogate.save("test.pth")
 
     second_surrogate = SingleFidelityGPSurrogate()
-    second_surrogate.init_GP_model(state)
+    second_surrogate.init_GP_model(state, kernel=MaternKernel, kernel_kwargs={"nu": 2.5})
     second_surrogate.load("test.pth", eval=True)
     os.remove("test.pth")
     second_testYs = second_surrogate.predict(state, testXs)

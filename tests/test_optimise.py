@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 import pytest_cases
 from botorch.acquisition import qLogExpectedImprovement, qUpperConfidenceBound
+from gpytorch.kernels import MaternKernel
 from millefeuille.optimise import suggest_next_locations
 from millefeuille.state import State
 from millefeuille.surrogate import SingleFidelityGPSurrogate
@@ -45,6 +46,7 @@ def test_optimise_singlefidelity_GP(singlefidelitysample, batch_size, generate_a
     state = State(ForresterDomain, Is, Xs, Ys)
 
     surrogate = SingleFidelityGPSurrogate()
+    surrogate.init_GP_model(state, kernel=MaternKernel, kernel_kwargs={"nu": 2.5})
     surrogate.fit(state)
 
     best_y = float(state.best_value)
@@ -68,7 +70,7 @@ def test_optimise_singlefidelity_GP(singlefidelitysample, batch_size, generate_a
     # Reset and use full wrapper
     initial_state = State(ForresterDomain, Is, Xs, Ys)
     surrogate = SingleFidelityGPSurrogate()
-    surrogate.init_GP_model(initial_state)
+    surrogate.init_GP_model(initial_state, kernel=MaternKernel, kernel_kwargs={"nu": 2.5})
 
     new_state = run_Bayesian_optimiser(
         1,

@@ -18,24 +18,20 @@ def generate_batch(
 ):
     # Generate new candidates
     if state.l_MultiFidelity:
-        if(state.fidelity_domain.target_fidelity):
+        if state.fidelity_domain.target_fidelity:
             target_fidel = state.fidelity_domain.target_fidelity
         else:
             target_fidel = len(state.fidelity_features) - 1
 
-        for fixed in state.fidelity_features:
-            fidelity_index = list(fixed.keys())[0]
-            fidelity_value = fixed[fidelity_index]
-            if(fidelity_value == target_fidel):
-                X_next, _ = optimize_acqf_mixed(
-                    acq_function=acq_function,
-                    bounds=state.get_bounds(),
-                    fixed_features_list=[fixed],
-                    q=batch_size,
-                    num_restarts=num_restarts,
-                    raw_samples=raw_samples,
-                    options=optimizer_options,
-                )
+        X_next, _ = optimize_acqf_mixed(
+            acq_function=acq_function,
+            bounds=state.get_bounds(),
+            fixed_features_list=[target_fidel],
+            q=batch_size,
+            num_restarts=num_restarts,
+            raw_samples=raw_samples,
+            options=optimizer_options,
+        )
     else:
         X_next, _ = optimize_acqf(
             acq_function,
