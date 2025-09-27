@@ -46,8 +46,10 @@ filterwarnings = [
     # raised by Cython, usually harmless
     "ignore:numpy.dtype size changed",
     "ignore:numpy.ufunc size changed",
-    # sometimes, dependencies leak resources
+    #" sometimes, dependencies leak resources
     "ignore:.*socket\\.socket.*:pytest.PytestUnraisableExceptionWarning",
+    # Common BOtorch warnings for testpath
+    "ignore:botorch.exceptions.warnings.OptimizationWarning",
 ]
 markers = [
     "regression: mark test as a regression test",
