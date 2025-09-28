@@ -8,12 +8,18 @@ import pytest_cases
 import torch
 import torch.nn as nn
 from botorch.exceptions.warnings import OptimizationWarning
-from gpytorch.kernels import MaternKernel
 from millefeuille.initialise import generate_initial_sample
 from millefeuille.state import State
 from millefeuille.surrogate import BasePyTorchModel, SingleFidelityEnsembleSurrogate, SingleFidelityGPSurrogate
 
-from .conftest import ForresterDomain, ForresterSampler, LowFidelityForresterMean, PythonForresterFunction
+from .conftest import (
+    TEST_KERNEL,
+    TEST_KERNEL_KWARGS,
+    ForresterDomain,
+    ForresterSampler,
+    LowFidelityForresterMean,
+    PythonForresterFunction,
+)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 dtype = torch.double
@@ -52,15 +58,14 @@ def test_singlefidelity_GP(singlefidelitysample, testXs):
 
     state = State(ForresterDomain, Is, Xs, Ys)
 
-    surrogate = SingleFidelityGPSurrogate()
-    surrogate.init_GP_model(state, kernel=MaternKernel, kernel_kwargs={"nu": 2.5})
+    surrogate = SingleFidelityGPSurrogate(kernel=TEST_KERNEL, kernel_kwargs=TEST_KERNEL_KWARGS)
     surrogate.fit(state)
     testYs = surrogate.predict(state, testXs)
 
     surrogate.save("test.pth")
 
-    second_surrogate = SingleFidelityGPSurrogate()
-    second_surrogate.init_GP_model(state, kernel=MaternKernel, kernel_kwargs={"nu": 2.5})
+    second_surrogate = SingleFidelityGPSurrogate(kernel=TEST_KERNEL, kernel_kwargs=TEST_KERNEL_KWARGS)
+    second_surrogate.init_GP_model(state)
     second_surrogate.load("test.pth", eval=True)
     os.remove("test.pth")
     second_testYs = second_surrogate.predict(state, testXs)
@@ -83,10 +88,9 @@ def test_singlefidelity_mean_module_GP(singlefidelitysample, testXs):
     output_scaler = copy.deepcopy(state.Y_scaler)
     output_scaler.training_override = True
 
-    mean_surrogate = SingleFidelityGPSurrogate()
     mean_module = LowFidelityForresterMean(output_scaler)
     initial_mean_state_dict = mean_module.state_dict()
-    mean_surrogate.init_GP_model(state, mean_module=mean_module)
+    mean_surrogate = SingleFidelityGPSurrogate(mean_module=mean_module)
     mean_surrogate.fit(state)
     testYs = mean_surrogate.predict(state, testXs)
 
@@ -110,8 +114,8 @@ def test_singlefidelity_mean_module_GP(singlefidelitysample, testXs):
     with pytest.raises(Exception) as _:
         error_surrogate.load("test.pth", eval=True)
 
-    second_surrogate = SingleFidelityGPSurrogate()
-    second_surrogate.init_GP_model(state, mean_module=LowFidelityForresterMean(state.Y_scaler))
+    second_surrogate = SingleFidelityGPSurrogate(mean_module=LowFidelityForresterMean(state.Y_scaler))
+    second_surrogate.init_GP_model(state)
     second_surrogate.load("test.pth", eval=True)
     os.remove("test.pth")
     second_testYs = second_surrogate.predict(state, testXs)

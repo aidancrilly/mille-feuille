@@ -101,19 +101,51 @@ class BaseGPSurrogate(BaseSurrogate, ABC):
 
     def __init__(
         self,
+        mean_module: Module | None = None,
+        kernel: Kernel | None = None,
+        kernel_kwargs: Dict | None = None,
+        ARD: bool = True,
         lengthscale_interval=DEFAULT_LENGTHSCALE_INTERVAL,
         noise_interval=DEFAULT_NOISE_INTERVAL,
         outputscale_interval=None,
     ):
         self.model = None
-        self.base_kernel = None
-        self.mean_module = None
-        self.likelihood = None
         self.state_dicts = None
-        self.initialised = False
+
         self.noise_interval = noise_interval
         self.lengthscale_interval = lengthscale_interval
         self.outputscale_interval = outputscale_interval
+
+        self.likelihood = GaussianLikelihood(noise_constraint=Interval(*self.noise_interval))
+        self.mean_module = mean_module
+        # Choose the kernel type
+        self.ARD = ARD
+        if kernel is not None:
+            assert issubclass(kernel, Kernel), "kernel must be a gpytorch Kernel subclass"
+            self.base_kernel = kernel
+        else:  # Default to RBF kernel
+            self.base_kernel = RBFKernel
+
+        if kernel_kwargs is None:
+            self.kernel_kwargs = {}
+        else:
+            self.kernel_kwargs = kernel_kwargs
+
+    def _get_covar_module(self, input_dim: int):
+        # Set up GP model
+        kernel_kwargs = self.kernel_kwargs.copy()
+        if self.ARD:
+            kernel_kwargs["ard_num_dims"] = input_dim
+        kernel = self.base_kernel(**kernel_kwargs, lengthscale_constraint=Interval(*self.lengthscale_interval))
+
+        # Set the covariance module
+        if self.outputscale_interval is None:
+            outputscale_constraint = None
+        else:
+            outputscale_constraint = Interval(*self.outputscale_interval)
+        covar_module = ScaleKernel(kernel, outputscale_constraint=outputscale_constraint)
+
+        return covar_module
 
     @abstractmethod
     def init_GP_model(self, state: State):
@@ -170,42 +202,11 @@ class SingleFidelityGPSurrogate(BaseGPSurrogate):
     def init_GP_model(
         self,
         state: State,
-        mean_module: Module | None = None,
-        kernel: Kernel | None = None,
-        kernel_kwargs: Dict | None = None,
         **kwargs,
     ):
-        # Set up GP model
-        if not self.initialised:
-            # Set the noise constraints
-            self.likelihood = GaussianLikelihood(noise_constraint=Interval(*self.noise_interval))
-
-            self.mean_module = mean_module
-
-            # Choose the kernel type
-            if kernel is not None:
-                assert issubclass(kernel, Kernel), "kernel must be a gpytorch Kernel subclass"
-                if kernel_kwargs is None:
-                    kernel_kwargs = {}
-                self.base_kernel = kernel(**kernel_kwargs, lengthscale_constraint=Interval(*self.lengthscale_interval))
-            else:  # Default to RBF kernel
-                d = state.dim
-                self.base_kernel = RBFKernel(
-                    ard_num_dims=d, lengthscale_constraint=Interval(*self.lengthscale_interval)
-                )
-
-            self.initialised = True
-        else:
-            print("No kernel specified, defaulting to RBFKernel. - NB: occurs if fit is called without init_GP_model")
+        covar_module = self._get_covar_module(state.dim)
 
         X_torch, Y_torch = self.get_XY(state)
-
-        # Set the covariance module
-        if self.outputscale_interval is None:
-            outputscale_constraint = None
-        else:
-            outputscale_constraint = Interval(*self.outputscale_interval)
-        covar_module = ScaleKernel(self.base_kernel, outputscale_constraint=outputscale_constraint)
 
         self.model = SingleTaskGP(
             X_torch,
@@ -257,43 +258,11 @@ class MultiFidelityGPSurrogate(BaseGPSurrogate):
     def init_GP_model(
         self,
         state: State,
-        mean_module: Module | None = None,
-        kernel: Kernel | None = None,
-        kernel_kwargs: Dict | None = None,
         **kwargs,
     ):
-        # Set up GP model
-        if not self.initialised:
-            # Set the noise constraints
-            self.likelihood = GaussianLikelihood(noise_constraint=Interval(*self.noise_interval))
-
-            self.mean_module = mean_module
-
-            # Choose the kernel type
-            if kernel is not None:
-                assert issubclass(kernel, Kernel), "kernel must be a gpytorch Kernel subclass"
-                if kernel_kwargs is None:
-                    kernel_kwargs = {}
-                self.base_kernel = kernel(**kernel_kwargs, lengthscale_constraint=Interval(*self.lengthscale_interval))
-            else:  # Default to RBF kernel
-                d = state.dim
-                self.base_kernel = RBFKernel(
-                    ard_num_dims=d, lengthscale_constraint=Interval(*self.lengthscale_interval)
-                )
-                print(
-                    "No kernel specified, defaulting to RBFKernel. - NB: occurs if fit is called without init_GP_model"
-                )
-
-            self.initialised = True
+        covar_module = covar_module = self._get_covar_module(state.dim)
 
         X_torch, Y_torch = self.get_XY(state)
-
-        # Set the covariance module
-        if self.outputscale_interval is None:
-            outputscale_constraint = None
-        else:
-            outputscale_constraint = Interval(*self.outputscale_interval)
-        covar_module = ScaleKernel(self.base_kernel, outputscale_constraint=outputscale_constraint)
 
         self.model = MultiTaskGP(
             X_torch,

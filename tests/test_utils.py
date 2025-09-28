@@ -8,7 +8,14 @@ from millefeuille.state import State
 from millefeuille.surrogate import MultiFidelityGPSurrogate, SingleFidelityGPSurrogate
 from millefeuille.utils import probabilistic_threshold_sampling
 
-from .conftest import ForresterDomain, ForresterSampler, PythonForresterFunction, Uniform
+from .conftest import (
+    TEST_KERNEL,
+    TEST_KERNEL_KWARGS,
+    ForresterDomain,
+    ForresterSampler,
+    PythonForresterFunction,
+    Uniform,
+)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 dtype = torch.double
@@ -76,7 +83,7 @@ def test_multifidelity_probabilistic_threshold_sampling(multifidelitysample, ini
 
     state = State(ForresterDomain, Is, Xs, Ys, Ss=Ss, fidelity_domain=ForresterFidelity)
 
-    surrogate = MultiFidelityGPSurrogate()
+    surrogate = MultiFidelityGPSurrogate(kernel=TEST_KERNEL, kernel_kwargs=TEST_KERNEL_KWARGS)
     surrogate.fit(state)
 
     sampler = Uniform(ForresterDomain.dim)
