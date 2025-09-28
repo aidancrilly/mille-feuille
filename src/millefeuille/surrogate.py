@@ -260,7 +260,7 @@ class MultiFidelityGPSurrogate(BaseGPSurrogate):
         state: State,
         **kwargs,
     ):
-        covar_module = covar_module = self._get_covar_module(state.dim)
+        covar_module = self._get_covar_module(state.dim)
 
         X_torch, Y_torch = self.get_XY(state)
 

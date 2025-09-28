@@ -178,7 +178,11 @@ class State:
 
         if self.Ys is not None:
             self.Y_scaler.fit(self.Ys)
-            self.best_value = self.Ys.max(axis=0)
+            if self.l_MultiFidelity:
+                Ys_target = self.Ys[self.Ss[:, 0] == self.target_fidelity, :]
+            else:
+                Ys_target = self.Ys.copy()
+            self.best_value = Ys_target.max(axis=0)
             self.best_value_transformed = self.Y_scaler.transform(self.best_value, return_torch=False)
             self.nsamples = self.Ys.shape[0]
 
@@ -201,7 +205,11 @@ class State:
         if refit_scaler and self.Ys.shape[0] > 1:
             self.Y_scaler.fit(self.Ys)
 
-        self.best_value = self.Ys.max(axis=0)
+        if self.l_MultiFidelity:
+            Ys_target = self.Ys[self.Ss[:, 0] == self.target_fidelity, :]
+        else:
+            Ys_target = self.Ys.copy()
+        self.best_value = Ys_target.max(axis=0)
         self.best_value_transformed = self.Y_scaler.transform(self.best_value, return_torch=False)
 
         self.nsamples = self.Ys.shape[0]
