@@ -66,8 +66,9 @@ def singlefidelitysample(ntrain):
 @pytest_cases.fixture()
 def multifidelitysample(ntrain):
     Is = np.arange(ntrain)
-    Ss = np.random.binomial(1, 0.5, size=ntrain).reshape(-1, 1)
-    Xs, _ = generate_initial_sample(ForresterDomain, ForresterSampler, ntrain)
+    _rng = np.random.default_rng(seed=124)
+    Ss = _rng.binomial(1, 0.5, size=ntrain).reshape(-1, 1)
+    Xs, _ = generate_initial_sample(ForresterDomain, ForresterSampler(_rng), ntrain)
     f = PythonForresterFunction()
     _, Ys = f(Is, Xs, Ss)
     return Is, Xs, Ss, Ys, f

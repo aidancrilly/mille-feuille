@@ -6,17 +6,15 @@ from millefeuille.domain import InputDomain
 from millefeuille.simulator import PythonSimulator
 from scipy.stats import qmc
 
-TEST_NUM_RESTARTS = 1
+TEST_NUM_RESTARTS = 2
 TEST_RAW_SAMPLES = 32
 
 TEST_KERNEL = MaternKernel
 TEST_KERNEL_KWARGS = {"nu": 2.5}
 
-_rng = np.random.default_rng(seed=12345)
-
 ForresterDomain = InputDomain(dim=1, b_low=np.array([0.0]), b_up=np.array([1.0]), steps=np.array([0.0]))
 
-ForresterSampler = qmc.LatinHypercube(ForresterDomain.dim, rng=_rng)
+ForresterSampler = lambda _rng: qmc.LatinHypercube(ForresterDomain.dim, rng=_rng)
 
 
 class PythonForresterFunction(PythonSimulator):

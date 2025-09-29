@@ -33,7 +33,8 @@ def ntrain(request):
 @pytest_cases.fixture()
 def singlefidelitysample(ntrain):
     Is = np.arange(ntrain)
-    Xs, _ = generate_initial_sample(ForresterDomain, ForresterSampler, ntrain)
+    _rng = np.random.default_rng(seed=12345)
+    Xs, _ = generate_initial_sample(ForresterDomain, ForresterSampler(_rng), ntrain)
     f = PythonForresterFunction()
     _, Ys = f(Is, Xs)
     return Is, Xs, Ys
@@ -46,7 +47,8 @@ def ntest(request):
 
 @pytest_cases.fixture()
 def testXs(ntest):
-    Xs, _ = generate_initial_sample(ForresterDomain, ForresterSampler, ntest)
+    _rng = np.random.default_rng(seed=12345)
+    Xs, _ = generate_initial_sample(ForresterDomain, ForresterSampler(_rng), ntest)
     return Xs
 
 
@@ -90,7 +92,9 @@ def test_singlefidelity_mean_module_GP(singlefidelitysample, testXs):
 
     mean_module = LowFidelityForresterMean(output_scaler)
     initial_mean_state_dict = mean_module.state_dict()
-    mean_surrogate = SingleFidelityGPSurrogate(mean_module=mean_module)
+    mean_surrogate = SingleFidelityGPSurrogate(
+        mean_module=mean_module, kernel=TEST_KERNEL, kernel_kwargs=TEST_KERNEL_KWARGS
+    )
     mean_surrogate.fit(state)
     testYs = mean_surrogate.predict(state, testXs)
 
@@ -108,13 +112,15 @@ def test_singlefidelity_mean_module_GP(singlefidelitysample, testXs):
                     f"Parameter {param_name} in mean module does not match initial state dict"
                 )
 
-    error_surrogate = SingleFidelityGPSurrogate()
+    error_surrogate = SingleFidelityGPSurrogate(kernel=TEST_KERNEL, kernel_kwargs=TEST_KERNEL_KWARGS)
     error_surrogate.init_GP_model(state)
     # Check error is raised when don't use mean module
     with pytest.raises(Exception) as _:
         error_surrogate.load("test.pth", eval=True)
 
-    second_surrogate = SingleFidelityGPSurrogate(mean_module=LowFidelityForresterMean(state.Y_scaler))
+    second_surrogate = SingleFidelityGPSurrogate(
+        mean_module=LowFidelityForresterMean(state.Y_scaler), kernel=TEST_KERNEL, kernel_kwargs=TEST_KERNEL_KWARGS
+    )
     second_surrogate.init_GP_model(state)
     second_surrogate.load("test.pth", eval=True)
     os.remove("test.pth")
@@ -169,7 +175,8 @@ def test_singlefidelity_NNEnsemble(testXs):
     ensemble_size = 10
 
     Is = np.arange(ntrain_NN)
-    Xs, _ = generate_initial_sample(ForresterDomain, ForresterSampler, ntrain_NN)
+    _rng = np.random.default_rng(seed=12345)
+    Xs, _ = generate_initial_sample(ForresterDomain, ForresterSampler(_rng), ntrain_NN)
     f = PythonForresterFunction()
     _, Ys = f(Is, Xs)
 
