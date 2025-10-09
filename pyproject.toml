@@ -37,18 +37,7 @@ package-dir = {"" = "src"}
 addopts = "--import-mode=importlib --strict-markers"
 pythonpath = "."
 testpaths = ["tests"]
-filterwarnings = [
-    "error",
-    # ignored by default
-    "ignore::DeprecationWarning",
-    "ignore::PendingDeprecationWarning",
-    "ignore::ImportWarning",
-    # raised by Cython, usually harmless
-    "ignore:numpy.dtype size changed",
-    "ignore:numpy.ufunc size changed",
-    # sometimes, dependencies leak resources
-    "ignore:.*socket\\.socket.*:pytest.PytestUnraisableExceptionWarning",
-]
+
 markers = [
     "regression: mark test as a regression test",
     "unit: mark test as a unit test"

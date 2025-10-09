@@ -21,7 +21,7 @@ def generate_batch(
         X_next, _ = optimize_acqf_mixed(
             acq_function=acq_function,
             bounds=state.get_bounds(),
-            fixed_features_list=state.fidelity_features,
+            fixed_features_list=[state.fidelity_domain.target_fidelities],
             q=batch_size,
             num_restarts=num_restarts,
             raw_samples=raw_samples,
