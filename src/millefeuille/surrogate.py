@@ -9,15 +9,15 @@ import torch.nn as nn
 from botorch.fit import fit_gpytorch_mll
 from botorch.models import SingleTaskGP
 from botorch.models.ensemble import EnsembleModel
+from botorch.models.multitask import MultiTaskGP
 from gpytorch.constraints import Interval
-from gpytorch.kernels import MaternKernel, ScaleKernel
+from gpytorch.kernels import Kernel, RBFKernel, ScaleKernel
 from gpytorch.likelihoods import GaussianLikelihood
 from gpytorch.mlls import ExactMarginalLogLikelihood
 from gpytorch.module import Module
 from torch import Tensor
 from torch.utils.data import DataLoader, TensorDataset, random_split
 
-from .kernel import ModifiedSingleTaskMultiFidelityGP
 from .state import State
 
 """
@@ -99,13 +99,53 @@ class BaseGPSurrogate(BaseSurrogate, ABC):
     Abstract base class for all GP surrogate models in mille-feuille.
     """
 
-    def __init__(self, lengthscale_interval=DEFAULT_LENGTHSCALE_INTERVAL, noise_interval=DEFAULT_NOISE_INTERVAL):
+    def __init__(
+        self,
+        mean_module: Module | None = None,
+        kernel: Kernel | None = None,
+        kernel_kwargs: Dict | None = None,
+        ARD: bool = True,
+        lengthscale_interval=DEFAULT_LENGTHSCALE_INTERVAL,
+        noise_interval=DEFAULT_NOISE_INTERVAL,
+        outputscale_interval=None,
+    ):
         self.model = None
-        self.mean_module = None
-        self.likelihood = None
         self.state_dicts = None
+
         self.noise_interval = noise_interval
         self.lengthscale_interval = lengthscale_interval
+        self.outputscale_interval = outputscale_interval
+
+        self.likelihood = GaussianLikelihood(noise_constraint=Interval(*self.noise_interval))
+        self.mean_module = mean_module
+        # Choose the kernel type
+        self.ARD = ARD
+        if kernel is not None:
+            assert issubclass(kernel, Kernel), "kernel must be a gpytorch Kernel subclass"
+            self.base_kernel = kernel
+        else:  # Default to RBF kernel
+            self.base_kernel = RBFKernel
+
+        if kernel_kwargs is None:
+            self.kernel_kwargs = {}
+        else:
+            self.kernel_kwargs = kernel_kwargs
+
+    def _get_covar_module(self, input_dim: int):
+        # Set up GP model
+        kernel_kwargs = self.kernel_kwargs.copy()
+        if self.ARD:
+            kernel_kwargs["ard_num_dims"] = input_dim
+        kernel = self.base_kernel(**kernel_kwargs, lengthscale_constraint=Interval(*self.lengthscale_interval))
+
+        # Set the covariance module
+        if self.outputscale_interval is None:
+            outputscale_constraint = None
+        else:
+            outputscale_constraint = Interval(*self.outputscale_interval)
+        covar_module = ScaleKernel(kernel, outputscale_constraint=outputscale_constraint)
+
+        return covar_module
 
     @abstractmethod
     def init_GP_model(self, state: State):
@@ -162,16 +202,12 @@ class SingleFidelityGPSurrogate(BaseGPSurrogate):
     def init_GP_model(
         self,
         state: State,
-        mean_module: Module | None = None,
         **kwargs,
     ):
+        covar_module = self._get_covar_module(state.dim)
+
         X_torch, Y_torch = self.get_XY(state)
 
-        self.likelihood = GaussianLikelihood(noise_constraint=Interval(*self.noise_interval))
-        covar_module = ScaleKernel(
-            MaternKernel(nu=2.5, ard_num_dims=state.dim, lengthscale_constraint=Interval(*self.lengthscale_interval))
-        )
-        self.mean_module = mean_module
         self.model = SingleTaskGP(
             X_torch,
             Y_torch,
@@ -183,56 +219,97 @@ class SingleFidelityGPSurrogate(BaseGPSurrogate):
 
         self.update_state_dicts()
 
-    def fit(self, state: State, approx_mll=False, **kwargs):
-        self.init_GP_model(state, self.mean_module, **kwargs)
+    def fit(self, state: State, max_retries=1, approx_mll=False, **kwargs):
+        self.init_GP_model(state, **kwargs)
 
         mll = ExactMarginalLogLikelihood(self.model.likelihood, self.model)
 
-        # Fit the model
-        fit_gpytorch_mll(mll, approx_mll=approx_mll)
+        # Fit the model - several attempts in case of failure
+        for attempt in range(max_retries):
+            try:
+                fit_gpytorch_mll(mll, approx_mll=approx_mll)
+                break
+            except RuntimeError as e:
+                print(f"Fitting failed (attempt {attempt + 1}), retrying… {e}")
 
     def predict(self, state: State, Xs):
+        # Get transformed model inputs on the device
         Xs_unit = state.transform_X(Xs)
         test_X = torch.tensor(Xs_unit, dtype=torch.double, device=device)
+
+        # Switch to evaluation mode for predictions
+        self.eval()
+
+        # Get predictions, from model posterior, not likelhood
+        # Likelehood adds fitted noise to the predictions, which we probably don't want for threshold sampling etc.
         with torch.no_grad():
-            post = self.likelihood(self.model(test_X))
+            # post = self.likelihood(self.model(test_X))
+            post = self.model.posterior(test_X)
             mean = post.mean.cpu().numpy().reshape(-1, 1)
             var = post.variance.cpu().numpy().reshape(-1, 1)
             std = np.sqrt(var)
+
+        # Get the predictions in unormalised space
         mean, std = state.inverse_transform_Y(mean, std)
         return {"mean": mean, "std": std}
 
 
 class MultiFidelityGPSurrogate(BaseGPSurrogate):
-    def init_GP_model(self, state):
+    def init_GP_model(
+        self,
+        state: State,
+        **kwargs,
+    ):
+        covar_module = self._get_covar_module(state.dim)
+
         X_torch, Y_torch = self.get_XY(state)
 
-        self.likelihood = GaussianLikelihood(noise_constraint=Interval(*self.noise_interval))
-
-        self.model = ModifiedSingleTaskMultiFidelityGP(
-            X_torch, Y_torch, likelihood=self.likelihood, outcome_transform=None
+        self.model = MultiTaskGP(
+            X_torch,
+            Y_torch,
+            task_feature=-1,
+            mean_module=self.mean_module,
+            covar_module=covar_module,
+            likelihood=self.likelihood,
+            **kwargs,
         )
 
         self.update_state_dicts()
 
-    def fit(self, state: State, approx_mll=False, **kwargs):
+    def fit(self, state: State, approx_mll=False, max_retries=1, **kwargs):
         self.init_GP_model(state, **kwargs)
 
         mll = ExactMarginalLogLikelihood(self.model.likelihood, self.model)
 
         # Fit the model
-        fit_gpytorch_mll(mll, approx_mll=approx_mll)
+        for attempt in range(max_retries):
+            try:
+                fit_gpytorch_mll(mll, approx_mll=approx_mll)
+                break
+            except RuntimeError as e:
+                print(f"Fitting failed (attempt {attempt + 1}), retrying... {e}")
 
     def predict(self, state: State, Xs):
-        Xs_unit = state.transform_X(Xs)
+        # Transform inputs -> this duplicates across fidelities
+        Xs_unit = state.transform_X(Xs)  # shape: (N * num_fidelities, d+1), last index of second axis is fidelity
         test_X = torch.tensor(Xs_unit, dtype=torch.double, device=device)
+
         with torch.no_grad():
-            post = self.model.likelihood(self.model(test_X))
-            mean = post.mean.cpu().numpy().reshape(-1, state.fidelity_domain.num_fidelities)
-            var = post.variance.cpu().numpy().reshape(-1, state.fidelity_domain.num_fidelities)
-            std = np.sqrt(var)
+            post = self.model.posterior(test_X)
+            mean = post.mean.cpu().numpy().reshape(-1)
+            std = np.sqrt(post.variance.cpu().numpy().reshape(-1))
+
+        # Reshape back into (N, num_fidelities)
+        N = Xs.shape[0]
+        F = state.fidelity_domain.num_fidelities
+        mean = mean.reshape(N, F)
+        std = std.reshape(N, F)
+
+        # Undo normalization
         mean, std = state.inverse_transform_Y(mean, std)
-        return {fid: {"mean": mean[:, fid], "std": std[:, fid]} for fid in range(state.fidelity_domain.num_fidelities)}
+
+        # Return in same dict format as before
+        return {fid: {"mean": mean[:, fid], "std": std[:, fid]} for fid in range(F)}
 
 
 ##################################################

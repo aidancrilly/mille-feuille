@@ -28,7 +28,8 @@ def nsample(request):
 @pytest_cases.fixture(params=[0.2, 0.5])
 def multifidelitysample(nsample, request):
     Is = np.arange(nsample)
-    Xs, _ = generate_initial_sample(ForresterDomain, ForresterSampler, nsample)
+    _rng = np.random.default_rng(seed=12345)
+    Xs, _ = generate_initial_sample(ForresterDomain, ForresterSampler(_rng), nsample)
     f = PythonForresterFunction()
     Ss = np.random.binomial(1, request.param, size=nsample).reshape(-1, 1)
     _, Ys = f(Is, Xs, Ss)

@@ -8,7 +8,14 @@ from millefeuille.state import State
 from millefeuille.surrogate import MultiFidelityGPSurrogate, SingleFidelityGPSurrogate
 from millefeuille.utils import probabilistic_threshold_sampling
 
-from .conftest import ForresterDomain, ForresterSampler, PythonForresterFunction, Uniform
+from .conftest import (
+    TEST_KERNEL,
+    TEST_KERNEL_KWARGS,
+    ForresterDomain,
+    ForresterSampler,
+    PythonForresterFunction,
+    Uniform,
+)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 dtype = torch.double
@@ -32,7 +39,8 @@ def threshold_value(request):
 @pytest_cases.fixture()
 def singlefidelitysample(ntrain):
     Is = np.arange(ntrain)
-    Xs, _ = generate_initial_sample(ForresterDomain, ForresterSampler, ntrain)
+    _rng = np.random.default_rng(seed=12345)
+    Xs, _ = generate_initial_sample(ForresterDomain, ForresterSampler(_rng), ntrain)
     f = PythonForresterFunction()
     _, Ys = f(Is, Xs)
     return Is, Xs, Ys
@@ -42,7 +50,8 @@ def singlefidelitysample(ntrain):
 def multifidelitysample(ntrain):
     Is = np.arange(ntrain)
     Ss = np.random.binomial(1, 0.5, size=ntrain).reshape(-1, 1)
-    Xs, _ = generate_initial_sample(ForresterDomain, ForresterSampler, ntrain)
+    _rng = np.random.default_rng(seed=12345)
+    Xs, _ = generate_initial_sample(ForresterDomain, ForresterSampler(_rng), ntrain)
     f = PythonForresterFunction()
     _, Ys = f(Is, Xs, Ss)
     return Is, Xs, Ss, Ys
@@ -68,6 +77,7 @@ def test_singlefidelity_probabilistic_threshold_sampling(singlefidelitysample, i
 
 
 @pytest.mark.unit
+@pytest.mark.filterwarnings("ignore::UserWarning")
 def test_multifidelity_probabilistic_threshold_sampling(multifidelitysample, initial_samples, threshold_value):
     Is, Xs, Ss, Ys = multifidelitysample
 
@@ -75,7 +85,7 @@ def test_multifidelity_probabilistic_threshold_sampling(multifidelitysample, ini
 
     state = State(ForresterDomain, Is, Xs, Ys, Ss=Ss, fidelity_domain=ForresterFidelity)
 
-    surrogate = MultiFidelityGPSurrogate()
+    surrogate = MultiFidelityGPSurrogate(kernel=TEST_KERNEL, kernel_kwargs=TEST_KERNEL_KWARGS)
     surrogate.fit(state)
 
     sampler = Uniform(ForresterDomain.dim)
