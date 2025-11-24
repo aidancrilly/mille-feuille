@@ -93,15 +93,15 @@ class StandardScaler(Standardize):
 
         return Y_return
 
-    def inverse_transform(self, Y, Yvar, return_torch=True):
+    def inverse_transform(self, Y, Ystd, return_torch=True):
         Y_torch = self._tensor_check(Y)
-        Yvar_torch = self._tensor_check(Yvar)
+        Yvar_torch = self._tensor_check(Ystd**2)  # Convert std to var
 
         if return_torch:
             return self.untransform(Y_torch, Yvar_torch)
         else:
             Y_torch, Yvar_torch = self.untransform(Y_torch, Yvar_torch)
-            return Y_torch.detach().cpu().numpy(), Yvar_torch.detach().cpu().numpy()
+            return Y_torch.detach().cpu().numpy(), np.sqrt(Yvar_torch.detach().cpu().numpy()) # Convert var back to std
 
 
 @dataclass
@@ -245,16 +245,7 @@ class State:
         return X
 
     def inverse_transform_Y(self, scaled_Ys, scaled_Y_stds=None):
-        """
-        Inverse-transforms scaled Y values and optionally their std deviations.
-
-        Parameters:
-            scaled_Ys: np.ndarray, transformed Y values
-            scaled_Y_stds: np.ndarray, std devs in transformed space (no mean shift)
-
-        Returns:
-            Tuple of (unscaled_Ys, unscaled_stds)
-        """
+        # Inverse transform Y values to original space
         unscaled_Ys, unscaled_stds = self.Y_scaler.inverse_transform(scaled_Ys, scaled_Y_stds, return_torch=False)
         return unscaled_Ys, unscaled_stds
 
