@@ -101,7 +101,7 @@ class StandardScaler(Standardize):
             return self.untransform(Y_torch, Yvar_torch)
         else:
             Y_torch, Yvar_torch = self.untransform(Y_torch, Yvar_torch)
-            return Y_torch.detach().cpu().numpy(), np.sqrt(Yvar_torch.detach().cpu().numpy()) # Convert var back to std
+            return Y_torch.detach().cpu().numpy(), np.sqrt(Yvar_torch.detach().cpu().numpy())  # Convert var back to std
 
 
 @dataclass

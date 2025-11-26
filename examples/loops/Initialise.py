@@ -47,4 +47,4 @@ if __name__ == "__main__":
     #############################################################################
 
     # Save inputs to file for PostInitialise
-    np.savetxt(inputs_save_file, np.c_[index_next, X_next], delimiter=',')
+    np.savetxt(inputs_save_file, np.c_[index_next, X_next], delimiter=",")
