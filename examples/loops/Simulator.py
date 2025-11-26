@@ -30,7 +30,7 @@ class Simulator(ExectuableSimulator):
         self.exe = base_paths["exe"]
 
         self.input_template = base_paths["input"]
-
+        self.run_dir = base_paths["run_dir"]
         self.inputs_dir = base_paths["inputs_dir"]
 
         safe_mkdir(self.run_dir)
