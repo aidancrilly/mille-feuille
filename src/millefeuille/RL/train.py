@@ -29,8 +29,8 @@ def soft_update(src, dst, tau: float):
     """
     Polyak averaging: dst <- tau*src + (1-tau)*dst
     """
-    tar = eqx.filter(src, eqx.is_array)
-    on, off = eqx.partition(dst, eqx.is_array)
+    tar = eqx.filter(dst, eqx.is_array)
+    on, off = eqx.partition(src, eqx.is_array)
     new = jax.tree.map(lambda t, o : t * (1 - tau) + o * tau, tar, on)
     return eqx.combine(new,off)
 
