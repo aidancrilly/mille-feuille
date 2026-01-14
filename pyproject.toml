@@ -12,6 +12,9 @@ dependencies = [
     "h5py",
     "numpy",
     "scipy",
+    "jax",
+    "equinox",
+    "optax",
 ]
 requires-python = ">=3.11"
 dynamic = ["version"]
