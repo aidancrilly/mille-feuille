@@ -42,9 +42,9 @@ class Env:
         self.run_index = 0
 
         # By default, p == s
-        self.state_transition_fn = state_transition_fn or (lambda s, a, p : p)
-        # By default, pass action and time to simulator inputs
-        self.x_builder = x_builder or (lambda s, a, t : np.append(a, t))
+        self.state_transition_fn = state_transition_fn or (lambda s, a, p : p.flatten())
+        # By default, pass state, action and time as simulator inputs
+        self.x_builder = x_builder or (lambda s, a, t : np.concatenate([s, a, np.array([t])]))
 
         self.state = np.zeros((cfg.state_dim,))
 
@@ -56,15 +56,18 @@ class Env:
             self.state = np.asarray(state).reshape((self.cfg.state_dim,))
         return self.state.copy()
 
-    def step(self, action: float) -> Tuple[np.ndarray, float, bool, Dict]:
+    def step(self, action: np.typing.ArrayLike) -> Tuple[np.ndarray, float, bool, Dict]:
         action = np.clip(action, self.cfg.action_low, self.cfg.action_high)
-        x = self.x_builder(self.state, action)
+        x = self.x_builder(self.state, action, self.t)
 
         idx = self.run_index
         self.run_index += 1
 
         # --- Coupling pattern matching the simulator ---
-        P, Y = self.simulator(np.arrary([idx]), x.reshape(1,-1))
+        if self.scheduler is None:
+            P, Y = self.simulator(np.array([idx]), x.reshape(1,-1))
+        else:
+            P, Y = self.simulator(np.array([idx]), x.reshape(1,-1), self.scheduler)
 
         reward = self.cfg.reward_fn(Y)
         next_state = self.state_transition_fn(self.state, action, P)
