@@ -1,7 +1,8 @@
 from dataclasses import dataclass
-from typing import Callable, Dict, Optional, Tuple
+from typing import Callable, Dict, Tuple
 
 import numpy as np
+
 
 @dataclass
 class SimEnvConfig:
@@ -24,13 +25,14 @@ class Env:
     Where reward is computed by calling an external simulator
 
     """
+
     def __init__(
         self,
         simulator,
         scheduler,
         cfg: SimEnvConfig,
-        state_transition_fn: Optional[Callable[[np.ndarray, np.ndarray, np.ndarray], np.ndarray]] = None,
-        x_builder: Optional[Callable[[np.ndarray, np.ndarray, int], np.ndarray]] = None,
+        state_transition_fn: Callable[[np.ndarray, np.ndarray, np.ndarray], np.ndarray] | None = None,
+        x_builder: Callable[[np.ndarray, np.ndarray, int], np.ndarray] | None = None,
         seed: int = 0,
     ):
         self.simulator = simulator
@@ -42,13 +44,13 @@ class Env:
         self.run_index = 0
 
         # By default, p == s
-        self.state_transition_fn = state_transition_fn or (lambda s, a, p : p.flatten())
+        self.state_transition_fn = state_transition_fn or (lambda s, a, p: p.flatten())
         # By default, pass state, action and time as simulator inputs
-        self.x_builder = x_builder or (lambda s, a, t : np.concatenate([s, a, np.array([t])]))
+        self.x_builder = x_builder or (lambda s, a, t: np.concatenate([s, a, np.array([t])]))
 
         self.state = np.zeros((cfg.state_dim,))
 
-    def reset(self, state: Optional[np.ndarray] = None) -> np.ndarray:
+    def reset(self, state: np.ndarray | None = None) -> np.ndarray:
         self.t = 0
         if state is None:
             self.state = np.zeros(self.cfg.state_dim)
@@ -65,9 +67,9 @@ class Env:
 
         # --- Coupling pattern matching the simulator ---
         if self.scheduler is None:
-            P, Y = self.simulator(np.array([idx]), x.reshape(1,-1))
+            P, Y = self.simulator(np.array([idx]), x.reshape(1, -1))
         else:
-            P, Y = self.simulator(np.array([idx]), x.reshape(1,-1), self.scheduler)
+            P, Y = self.simulator(np.array([idx]), x.reshape(1, -1), self.scheduler)
 
         reward = self.cfg.reward_fn(Y)
         next_state = self.state_transition_fn(self.state, action, P)

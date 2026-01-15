@@ -1,5 +1,7 @@
-import numpy as np
 from typing import Dict
+
+import numpy as np
+
 
 class ReplayBuffer:
     def __init__(self, capacity: int, state_dim: int, action_dim: int):

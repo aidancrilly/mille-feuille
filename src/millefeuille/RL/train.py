@@ -1,29 +1,33 @@
-import jax
+from typing import Dict, Tuple
+
 import equinox as eqx
+import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
 
-from typing import Dict, Tuple
-
 from .actor import Actor
-from .critic import Critic
 from .agent import Agent
 from .buffer import ReplayBuffer
+from .critic import Critic
 from .environment import Env
 
+
 def actor_loss_fn(actor: Actor, critic: Critic, batch: Dict[str, jnp.ndarray]) -> jnp.ndarray:
-    pa = actor(batch["s"])            # shape (B,action_dim)
+    pa = actor(batch["s"])  # shape (B,action_dim)
     q = critic(batch["s"], pa)
     return -jnp.mean(q)
 
-def critic_loss_fn(critic: Critic, critic_tgt: Critic, actor_tgt: Agent, 
-                   batch: Dict[str, jnp.ndarray], gamma: float) -> jnp.ndarray:
-    na = actor_tgt(batch["ns"])                     # shape (B,action_dim)
-    q_tgt = critic_tgt(batch["ns"], na)             # shape (B,1)
-    y = batch["r"] + gamma * (1.0 - batch["d"]) * q_tgt      # shape (B,1)
+
+def critic_loss_fn(
+    critic: Critic, critic_tgt: Critic, actor_tgt: Agent, batch: Dict[str, jnp.ndarray], gamma: float
+) -> jnp.ndarray:
+    na = actor_tgt(batch["ns"])  # shape (B,action_dim)
+    q_tgt = critic_tgt(batch["ns"], na)  # shape (B,1)
+    y = batch["r"] + gamma * (1.0 - batch["d"]) * q_tgt  # shape (B,1)
     q = critic(batch["s"], batch["a"])
     return jnp.mean((q - jax.lax.stop_gradient(y)) ** 2)
+
 
 def soft_update(src, dst, tau: float):
     """
@@ -31,8 +35,9 @@ def soft_update(src, dst, tau: float):
     """
     tar = eqx.filter(dst, eqx.is_array)
     on, off = eqx.partition(src, eqx.is_array)
-    new = jax.tree.map(lambda t, o : t * (1 - tau) + o * tau, tar, on)
-    return eqx.combine(new,off)
+    new = jax.tree.map(lambda t, o: t * (1 - tau) + o * tau, tar, on)
+    return eqx.combine(new, off)
+
 
 def train(
     env: Env,
@@ -49,7 +54,6 @@ def train(
     print_every: int = 100,
     seed: int = 420,
 ) -> Agent:
-
     rb = ReplayBuffer(replay_size, env.cfg.state_dim, env.cfg.action_dim)
     rng = np.random.default_rng(seed)
     jax_key = jax.random.PRNGKey(seed)
@@ -65,13 +69,13 @@ def train(
     opt_state_critic = opt_critic.init(eqx.filter(agent.critic, eqx.is_array))
 
     @eqx.filter_jit
-    def ddpg_update(agent: Agent, opt_state_a, opt_state_c, batch: Dict[str, jnp.ndarray]) -> Tuple[Agent, Dict[str, jnp.ndarray]]:
-
+    def ddpg_update(
+        agent: Agent, opt_state_a, opt_state_c, batch: Dict[str, jnp.ndarray]
+    ) -> Tuple[Agent, Dict[str, jnp.ndarray]]:
         # ----- Critic update -----
         critic_loss, critic_grads = eqx.filter_value_and_grad(critic_loss_fn)(
-            agent.critic, agent.critic_tgt, agent.actor_tgt, 
-            batch, agent.gamma
-            )
+            agent.critic, agent.critic_tgt, agent.actor_tgt, batch, agent.gamma
+        )
         critic_params = eqx.filter(agent.critic, eqx.is_array)
         critic_updates, new_opt_state_c = opt_critic.update(critic_grads, opt_state_c, critic_params)
         new_critic = eqx.apply_updates(agent.critic, critic_updates)
@@ -102,8 +106,8 @@ def train(
             a = rng.uniform(env.cfg.action_low, env.cfg.action_high)
         else:
             jax_key, _ = jax.random.split(jax_key)
-            a = np.squeeze(np.array(agent.actor(jnp.asarray(s[None,:]))),axis=0)
-            a += rng.normal(scale=explore_noise,size=env.cfg.action_dim)
+            a = np.squeeze(np.array(agent.actor(jnp.asarray(s[None, :]))), axis=0)
+            a += rng.normal(scale=explore_noise, size=env.cfg.action_dim)
             a = np.clip(a, env.cfg.action_low, env.cfg.action_high)
 
         ns, r, done, info = env.step(a)
@@ -114,7 +118,10 @@ def train(
         episode_len += 1
 
         if done:
-            print(f"[episode done] return={episode_return:.3f} len={episode_len} last_Y={float(np.squeeze(info['Y'])):.6f}")
+            print(
+                f"[episode done] return={episode_return:.3f} len={episode_len}"
+                + f" last_Y={float(np.squeeze(info['Y'])):.6f}"
+            )
             s = env.reset()
             episode_return = 0.0
             episode_len = 0
@@ -124,7 +131,9 @@ def train(
             for _ in range(updates_per_step):
                 batch_np = rb.sample(batch_size)
                 batch = {k: jnp.asarray(v) for k, v in batch_np.items()}
-                agent, opt_state_actor, opt_state_critic, metrics = ddpg_update(agent, opt_state_actor, opt_state_critic, batch)
+                agent, opt_state_actor, opt_state_critic, metrics = ddpg_update(
+                    agent, opt_state_actor, opt_state_critic, batch
+                )
 
             if i % print_every == 0:
                 cl = float(metrics["critic_loss"])

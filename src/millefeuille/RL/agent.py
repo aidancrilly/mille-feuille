@@ -1,11 +1,12 @@
-import jax
-import equinox as eqx
-
 from typing import Tuple
+
+import equinox as eqx
+import jax
 from jaxtyping import Array, PRNGKeyArray
 
 from .actor import Actor
 from .critic import Critic
+
 
 class Agent(eqx.Module):
     actor: Actor
@@ -15,10 +16,12 @@ class Agent(eqx.Module):
     gamma: float
     tau: float
 
+
 def copy_module(old):
     params, static = eqx.partition(old, eqx.is_array)
-    new_params = jax.tree.map(lambda x : x, params)
+    new_params = jax.tree.map(lambda x: x, params)
     return eqx.combine(new_params, static)
+
 
 def make_agent(
     key: PRNGKeyArray,
