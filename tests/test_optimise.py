@@ -1,4 +1,4 @@
-oimport numpy as np
+import numpy as np
 import pytest
 import pytest_cases
 import torch
