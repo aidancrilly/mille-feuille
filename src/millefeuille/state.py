@@ -270,7 +270,8 @@ class State:
     def to_csv(self, filename: str):
         """
         Save index, Xs, Ps, Ss, Ys to a CSV file.
-        Appends only new rows if file exists.
+        Appends only new rows if file exists, comparing by index value to
+        prevent overwriting rows with matching index values.
         """
         # Check arrays
         if self.index is None or self.Xs is None or self.Ys is None:
@@ -296,14 +297,24 @@ class State:
             header += self.Y_names
 
         data = np.hstack(cols)
+        n_index_cols = indices.shape[1]
 
-        # Determine how many rows already exist
-        existing_rows = 0
+        # Determine which rows have index values not already in the file
         if os.path.exists(filename):
+            existing_indices = set()
             with open(filename, "r", newline="") as f:
-                existing_rows = sum(1 for _ in f) - 1  # subtract header row
+                reader = csv.reader(f)
+                next(reader, None)  # skip header
+                for row in reader:
+                    if row:
+                        existing_indices.add(tuple(row[:n_index_cols]))
 
-        new_data = data[existing_rows:]
+            # Convert index columns to string tuples matching csv.writer output
+            new_idx_tuples = [tuple(str(v) for v in row) for row in data[:, :n_index_cols]]
+            new_mask = np.array([t not in existing_indices for t in new_idx_tuples])
+            new_data = data[new_mask]
+        else:
+            new_data = data
 
         if new_data.shape[0] == 0:
             print("No new rows to write.")

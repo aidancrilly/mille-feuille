@@ -8,7 +8,7 @@ from millefeuille.domain import FidelityDomain
 from millefeuille.initialise import generate_initial_sample
 from millefeuille.optimise import suggest_next_locations
 from millefeuille.state import State
-from millefeuille.surrogate import MultiFidelityGPSurrogate, SingleFidelityGPSurrogate
+from millefeuille.surrogate import MultiFidelityGPSurrogate, SingleFidelityGPSurrogate, SingleFidelityRandomForestSurrogate
 from millefeuille.utils import run_Bayesian_optimiser
 
 from .conftest import (
@@ -165,3 +165,52 @@ def test_optimise_multifidelity_GP(multifidelitysample, batch_size, generate_MF_
     )
 
     assert np.isclose(new_state.best_value, state.best_value, rtol=1e-2)
+
+
+@pytest.mark.unit
+def test_optimise_singlefidelity_RF(singlefidelitysample, batch_size, generate_acq_function):
+    Is, Xs, Ys, f = singlefidelitysample
+
+    state = State(ForresterDomain, Is, Xs, Ys)
+
+    surrogate = SingleFidelityRandomForestSurrogate(n_estimators=50)
+    surrogate.fit(state)
+
+    best_y = float(state.best_value.item())
+
+    acq_function = generate_acq_function(surrogate, state)
+
+    X_next = suggest_next_locations(
+        batch_size, state, acq_function, num_restarts=TEST_NUM_RESTARTS, raw_samples=TEST_RAW_SAMPLES
+    )
+    assert X_next.shape[0] == batch_size, "suggest_next_locations do not return batch_size candidates"
+    assert X_next.shape[1] == Xs.shape[1], "suggest_next_locations candidates did not have same dimension as problem"
+
+    I_next = np.amax(Is) + 1 + np.arange(batch_size)
+    _, Y_next = f(I_next, X_next)
+
+    state.update(I_next, X_next, Y_next)
+
+    assert float(state.best_value.item()) >= best_y
+    assert len(state.Ys) == len(Ys) + batch_size
+
+    # Reset and use full wrapper
+    initial_state = State(ForresterDomain, Is, Xs, Ys)
+    surrogate = SingleFidelityRandomForestSurrogate(n_estimators=50)
+
+    new_state = run_Bayesian_optimiser(
+        5,
+        batch_size,
+        generate_acq_function,
+        initial_state,
+        surrogate,
+        f,
+        num_restarts=TEST_NUM_RESTARTS,
+        raw_samples=TEST_RAW_SAMPLES,
+    )
+
+    # since RF is non-deterministic and may not find the best point first time
+    assert (
+        np.isclose(new_state.best_value, state.best_value, atol=0.1)
+        or new_state.best_value.item() > state.best_value.item()
+    )

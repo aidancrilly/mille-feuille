@@ -16,6 +16,14 @@ def generate_batch(
     raw_samples,
     optimizer_options,
 ):
+    # Check for non-gradable surrogate
+    if hasattr(acq_function.model, "no_grad"):
+        if acq_function.model.no_grad:  # Check for attribute then check value for True
+            if optimizer_options is None:
+                optimizer_options = {"with_grad": False}
+            else:
+                optimizer_options = optimizer_options | {"with_grad": False}
+
     # Generate new candidates
     if state.l_MultiFidelity:
         X_next, _ = optimize_acqf_mixed(
