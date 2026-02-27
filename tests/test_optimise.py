@@ -83,7 +83,7 @@ def test_optimise_singlefidelity_GP(singlefidelitysample, batch_size, generate_a
     surrogate = SingleFidelityGPSurrogate(kernel=TEST_KERNEL, kernel_kwargs=TEST_KERNEL_KWARGS)
     surrogate.fit(state)
 
-    best_y = float(state.best_value)
+    best_y = float(state.best_value.item())
 
     acq_function = generate_acq_function(surrogate, state)
 
@@ -98,7 +98,7 @@ def test_optimise_singlefidelity_GP(singlefidelitysample, batch_size, generate_a
 
     state.update(I_next, X_next, Y_next)
 
-    assert float(state.best_value) >= best_y
+    assert float(state.best_value.item()) >= best_y
     assert len(state.Ys) == len(Ys) + batch_size
 
     # Reset and use full wrapper
@@ -131,7 +131,7 @@ def test_optimise_multifidelity_GP(multifidelitysample, batch_size, generate_MF_
     surrogate = MultiFidelityGPSurrogate()
     surrogate.fit(state)
 
-    best_y = float(state.best_value)
+    best_y = float(state.best_value.item())
 
     acq_function = generate_MF_acq_function(surrogate, state)
 
@@ -146,7 +146,7 @@ def test_optimise_multifidelity_GP(multifidelitysample, batch_size, generate_MF_
 
     state.update(I_next, X_next, Y_next, S_next=S_next)
 
-    assert float(state.best_value) >= best_y
+    assert float(state.best_value.item()) >= best_y
     assert len(state.Ys) == len(Ys) + batch_size
 
     # Reset and use full wrapper
