@@ -574,6 +574,10 @@ class RandomForestEnsembleModel(EnsembleModel):
         self._num_outputs = 1
         self.rf = RandomForestRegressor(n_estimators=n_estimators, max_depth=max_depth, **rf_kwargs)
 
+    @property
+    def no_grad(self) -> bool:
+        return True
+
     def fit(self, X: Tensor, y: Tensor) -> None:
         X_np = X.cpu().double().numpy()
         y_np = y.cpu().double().numpy().reshape(-1)
@@ -582,24 +586,19 @@ class RandomForestEnsembleModel(EnsembleModel):
     def forward(self, X: Tensor) -> Tensor:
         # X shape: (*batch_shape, q, D)
         X_np = X.cpu().double().numpy()
-        D = X_np.shape[-1]
-        q = X_np.shape[-2]
-        batch_shape = X_np.shape[:-2]
-        num_batch_dims = len(batch_shape)
+        N, q, D = X.shape  # Samples, q-batch, Feature
 
         X_flat = X_np.reshape(-1, D)
 
         # Collect predictions from each tree: (n_estimators, prod(batch_shape)*q)
         tree_preds = np.array([est.predict(X_flat) for est in self.rf.estimators_])
 
-        # Reshape to (n_estimators, *batch_shape, q)
-        tree_preds = tree_preds.reshape(len(self.rf.estimators_), *batch_shape, q)
+        # Reshape to (n_estimators, N, q)
+        tree_preds = tree_preds.reshape(len(self.rf.estimators_), N, q)
 
-        # Transpose to (*batch_shape, n_estimators, q) then add output dim
-        axes = list(range(1, num_batch_dims + 1)) + [0, num_batch_dims + 1]
-        tree_preds = np.transpose(tree_preds, axes)
-
-        # Add output dimension: (*batch_shape, n_estimators, q, m=1)
+        # Transpose to (N, n_estimators, q) then add output dim
+        tree_preds = np.transpose(tree_preds, [1, 0, 2])  # (N, n_estimators, q)
+        # Add output dimension: (N, n_estimators, q, m=1)
         tree_preds = tree_preds[..., np.newaxis]
 
         return torch.tensor(tree_preds, dtype=X.dtype, device=X.device)

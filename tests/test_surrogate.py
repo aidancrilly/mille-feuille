@@ -10,7 +10,12 @@ import torch.nn as nn
 from botorch.exceptions.warnings import OptimizationWarning
 from millefeuille.initialise import generate_initial_sample
 from millefeuille.state import State
-from millefeuille.surrogate import BasePyTorchModel, SingleFidelityEnsembleSurrogate, SingleFidelityGPSurrogate, SingleFidelityRandomForestSurrogate
+from millefeuille.surrogate import (
+    BasePyTorchModel,
+    SingleFidelityEnsembleSurrogate,
+    SingleFidelityGPSurrogate,
+    SingleFidelityRandomForestSurrogate,
+)
 
 from .conftest import (
     TEST_KERNEL,
@@ -208,7 +213,6 @@ def test_singlefidelity_NNEnsemble(testXs):
     assert np.isclose(testYs["std"], second_testYs["std"]).all(), (
         "Std. dev. predictions diverged between saved and loaded surrogate model"
     )
-
 
 
 @pytest.mark.unit
