@@ -10,7 +10,12 @@ import torch.nn as nn
 from botorch.exceptions.warnings import OptimizationWarning
 from millefeuille.initialise import generate_initial_sample
 from millefeuille.state import State
-from millefeuille.surrogate import BasePyTorchModel, SingleFidelityEnsembleSurrogate, SingleFidelityGPSurrogate
+from millefeuille.surrogate import (
+    BasePyTorchModel,
+    SingleFidelityEnsembleSurrogate,
+    SingleFidelityGPSurrogate,
+    SingleFidelityRandomForestSurrogate,
+)
 
 from .conftest import (
     TEST_KERNEL,
@@ -200,6 +205,35 @@ def test_singlefidelity_NNEnsemble(testXs):
     )
     os.remove("test.pth")
 
+    second_testYs = second_surrogate.predict(state, testXs)
+
+    assert np.isclose(testYs["mean"], second_testYs["mean"]).all(), (
+        "Mean predictions diverged between saved and loaded surrogate model"
+    )
+    assert np.isclose(testYs["std"], second_testYs["std"]).all(), (
+        "Std. dev. predictions diverged between saved and loaded surrogate model"
+    )
+
+
+@pytest.mark.unit
+def test_singlefidelity_RandomForest(singlefidelitysample, testXs):
+    Is, Xs, Ys = singlefidelitysample
+
+    state = State(ForresterDomain, Is, Xs, Ys)
+
+    surrogate = SingleFidelityRandomForestSurrogate(n_estimators=50, max_depth=5)
+    surrogate.fit(state)
+    testYs = surrogate.predict(state, testXs)
+
+    assert testYs["mean"].shape == (len(testXs), 1), "Unexpected mean shape"
+    assert testYs["std"].shape == (len(testXs), 1), "Unexpected std shape"
+    assert np.all(testYs["std"] >= 0), "Standard deviation must be non-negative"
+
+    surrogate.save("test_rf.pth")
+
+    second_surrogate = SingleFidelityRandomForestSurrogate(n_estimators=50, max_depth=5)
+    second_surrogate.load("test_rf.pth")
+    os.remove("test_rf.pth")
     second_testYs = second_surrogate.predict(state, testXs)
 
     assert np.isclose(testYs["mean"], second_testYs["mean"]).all(), (
