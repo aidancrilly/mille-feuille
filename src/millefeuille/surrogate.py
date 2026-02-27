@@ -15,6 +15,7 @@ from gpytorch.kernels import Kernel, RBFKernel, ScaleKernel
 from gpytorch.likelihoods import GaussianLikelihood
 from gpytorch.mlls import ExactMarginalLogLikelihood
 from gpytorch.module import Module
+from sklearn.ensemble import RandomForestRegressor
 from torch import Tensor
 from torch.utils.data import DataLoader, TensorDataset, random_split
 
@@ -555,3 +556,95 @@ class SingleFidelityEnsembleSurrogate(BaseEnsemblePyTorchSurrogate):
             std = np.sqrt(var)
         mean, std = state.inverse_transform_Y(mean, std)
         return {"mean": mean, "std": std}
+
+
+##################################################
+############ Random Forest Surrogate #############
+##################################################
+
+
+class RandomForestEnsembleModel(EnsembleModel):
+    """
+    BoTorch EnsembleModel wrapping a scikit-learn RandomForestRegressor.
+    Each decision tree in the forest acts as one ensemble member.
+    """
+
+    def __init__(self, n_estimators: int = 100, max_depth: int | None = None, **rf_kwargs):
+        super().__init__()
+        self._num_outputs = 1
+        self.rf = RandomForestRegressor(n_estimators=n_estimators, max_depth=max_depth, **rf_kwargs)
+
+    def fit(self, X: Tensor, y: Tensor) -> None:
+        X_np = X.cpu().double().numpy()
+        y_np = y.cpu().double().numpy().reshape(-1)
+        self.rf.fit(X_np, y_np)
+
+    def forward(self, X: Tensor) -> Tensor:
+        # X shape: (*batch_shape, q, D)
+        X_np = X.cpu().double().numpy()
+        D = X_np.shape[-1]
+        q = X_np.shape[-2]
+        batch_shape = X_np.shape[:-2]
+        num_batch_dims = len(batch_shape)
+
+        X_flat = X_np.reshape(-1, D)
+
+        # Collect predictions from each tree: (n_estimators, prod(batch_shape)*q)
+        tree_preds = np.array([est.predict(X_flat) for est in self.rf.estimators_])
+
+        # Reshape to (n_estimators, *batch_shape, q)
+        tree_preds = tree_preds.reshape(len(self.rf.estimators_), *batch_shape, q)
+
+        # Transpose to (*batch_shape, n_estimators, q) then add output dim
+        axes = list(range(1, num_batch_dims + 1)) + [0, num_batch_dims + 1]
+        tree_preds = np.transpose(tree_preds, axes)
+
+        # Add output dimension: (*batch_shape, n_estimators, q, m=1)
+        tree_preds = tree_preds[..., np.newaxis]
+
+        return torch.tensor(tree_preds, dtype=X.dtype, device=X.device)
+
+
+class SingleFidelityRandomForestSurrogate(BaseSurrogate):
+    """
+    Single-fidelity surrogate using a Random Forest ensemble via BoTorch's EnsembleModel.
+
+    Hyperparameters
+    ---------------
+    n_estimators : int
+        Number of trees in the forest (default: 100).
+    max_depth : int or None
+        Maximum depth of each tree. None means nodes are expanded until all
+        leaves are pure or contain fewer than min_samples_split samples.
+    rf_kwargs : dict
+        Additional keyword arguments forwarded to
+        ``sklearn.ensemble.RandomForestRegressor``.
+    """
+
+    def __init__(self, n_estimators: int = 100, max_depth: int | None = None, **rf_kwargs):
+        self.model = RandomForestEnsembleModel(n_estimators=n_estimators, max_depth=max_depth, **rf_kwargs)
+
+    def fit(self, state: State):
+        X_torch, Y_torch = self.get_XY(state)
+        self.model.fit(X_torch, Y_torch)
+
+    def predict(self, state: State, Xs):
+        Xs_unit = state.transform_X(Xs)
+        test_X = torch.tensor(Xs_unit, dtype=dtype, device=device)
+        with torch.no_grad():
+            post = self.model.posterior(test_X.unsqueeze(1))
+            mean = post.mean.cpu().numpy().reshape(-1, 1)
+            var = post.variance.cpu().numpy().reshape(-1, 1)
+            std = np.sqrt(var)
+        mean, std = state.inverse_transform_Y(mean, std)
+        return {"mean": mean, "std": std}
+
+    def eval(self):
+        pass
+
+    def save(self, filepath: str):
+        torch.save({"rf": self.model.rf}, filepath)
+
+    def load(self, filepath: str, eval=True):
+        checkpoint = torch.load(filepath, weights_only=False, map_location=device)
+        self.model.rf = checkpoint["rf"]
