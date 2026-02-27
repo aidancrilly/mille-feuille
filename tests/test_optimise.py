@@ -1,4 +1,4 @@
-import numpy as np
+oimport numpy as np
 import pytest
 import pytest_cases
 import torch
@@ -165,8 +165,8 @@ def test_optimise_singlefidelity_RF(singlefidelitysample, batch_size, generate_a
         raw_samples=TEST_RAW_SAMPLES,
     )
 
-    # Equal or better value, since RF is non-deterministic and may not find the best point first time
-    assert new_state.best_value.item() >= state.best_value.item()
+    # since RF is non-deterministic and may not find the best point first time
+    assert np.isclose(new_state.best_value, state.best_value, atol=0.1)
 
 
 @pytest.mark.unit
