@@ -168,6 +168,68 @@ class NNSurrogate(BasePyTorchModel):
 
 
 @pytest.mark.unit
+@pytest.mark.filterwarnings("ignore::botorch.exceptions.warnings.OptimizationWarning")
+def test_singlefidelity_GP_verbose(singlefidelitysample, capsys):
+    warnings.filterwarnings("ignore", category=OptimizationWarning)
+    Is, Xs, Ys = singlefidelitysample
+
+    state = State(ForresterDomain, Is, Xs, Ys)
+
+    surrogate = SingleFidelityGPSurrogate(kernel=TEST_KERNEL, kernel_kwargs=TEST_KERNEL_KWARGS, verbose=True)
+    surrogate.fit(state)
+
+    captured = capsys.readouterr()
+    assert "SingleFidelityGPSurrogate fit summary" in captured.out
+    assert "Noise level" in captured.out
+    assert "Length scales" in captured.out
+
+
+@pytest.mark.unit
+@pytest.mark.filterwarnings("ignore::botorch.exceptions.warnings.OptimizationWarning")
+def test_singlefidelity_GP_not_verbose(singlefidelitysample, capsys):
+    warnings.filterwarnings("ignore", category=OptimizationWarning)
+    Is, Xs, Ys = singlefidelitysample
+
+    state = State(ForresterDomain, Is, Xs, Ys)
+
+    surrogate = SingleFidelityGPSurrogate(kernel=TEST_KERNEL, kernel_kwargs=TEST_KERNEL_KWARGS)
+    surrogate.fit(state)
+
+    captured = capsys.readouterr()
+    assert "fit summary" not in captured.out
+
+
+@pytest.mark.unit
+def test_singlefidelity_NNEnsemble_verbose(testXs, capsys):
+    ntrain_NN = 50
+    batch_size = 32
+    nepochs = 10
+    ensemble_size = 3
+
+    Is = np.arange(ntrain_NN)
+    _rng = np.random.default_rng(seed=12345)
+    Xs, _ = generate_initial_sample(ForresterDomain, ForresterSampler(_rng), ntrain_NN)
+    f = PythonForresterFunction()
+    _, Ys = f(Is, Xs)
+
+    state = State(ForresterDomain, Is, Xs, Ys)
+
+    surrogate = SingleFidelityEnsembleSurrogate(
+        ensemble_size=ensemble_size,
+        model_base_class=NNSurrogate,
+        training_epochs=nepochs,
+        batch_size=batch_size,
+        verbose=True,
+    )
+    surrogate.fit(state)
+
+    captured = capsys.readouterr()
+    assert "SingleFidelityEnsembleSurrogate fit summary" in captured.out
+    assert "MSE" in captured.out
+    assert "R2" in captured.out
+
+
+@pytest.mark.unit
 def test_singlefidelity_NNEnsemble(testXs):
     ntrain_NN = 50
     batch_size = 32
