@@ -56,7 +56,7 @@ class BaseSurrogate(ABC):
         Print a summary of the fitted model parameters.
         Subclasses should override this to provide model-specific information.
         """
-        pass
+        print("Surrogate fit summary: No details available for this surrogate type.")
 
     def get_XY(self, state: State, output_key: str | None = None):
         """

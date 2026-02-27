@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.stats.qmc import Sobol
 from Simulator import Simulator
+
 from Utils import read_domainfile
 
 EXECUTABLE = "path_to_your_executable"
