@@ -129,7 +129,7 @@ def test_optimise_singlefidelity_RF(singlefidelitysample, batch_size, generate_a
 
     state = State(ForresterDomain, Is, Xs, Ys)
 
-    surrogate = SingleFidelityRandomForestSurrogate(n_estimators=10, max_depth=5)
+    surrogate = SingleFidelityRandomForestSurrogate(n_estimators=50)
     surrogate.fit(state)
 
     best_y = float(state.best_value.item())
@@ -152,7 +152,7 @@ def test_optimise_singlefidelity_RF(singlefidelitysample, batch_size, generate_a
 
     # Reset and use full wrapper
     initial_state = State(ForresterDomain, Is, Xs, Ys)
-    surrogate = SingleFidelityRandomForestSurrogate(n_estimators=10, max_depth=5)
+    surrogate = SingleFidelityRandomForestSurrogate(n_estimators=50)
 
     new_state = run_Bayesian_optimiser(
         5,
@@ -166,7 +166,10 @@ def test_optimise_singlefidelity_RF(singlefidelitysample, batch_size, generate_a
     )
 
     # since RF is non-deterministic and may not find the best point first time
-    assert np.isclose(new_state.best_value, state.best_value, atol=0.1) or new_state.best_value.item() > state.best_value.item()
+    assert (
+    np.isclose(new_state.best_value, state.best_value, atol=0.1) or 
+    new_state.best_value.item() > state.best_value.item()
+    )
 
 
 @pytest.mark.unit
