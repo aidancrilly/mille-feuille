@@ -12,3 +12,8 @@ __pycache__/
 *.pth
 
 **/nlohmann
+
+finput_*.nml
+foutput_*.txt
+std_error_*.txt
+std_output_*.txt
