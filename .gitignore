@@ -12,3 +12,5 @@ __pycache__/
 *.pth
 
 **/nlohmann
+
+docs/_build/
