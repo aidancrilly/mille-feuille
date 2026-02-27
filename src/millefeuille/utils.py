@@ -140,6 +140,54 @@ def run_Bayesian_optimiser(
     verbose=False,
     **kwargs,
 ):
+    """Run a Bayesian optimisation loop for a fixed number of iterations.
+
+    At each iteration the surrogate is re-fitted to all current samples, a
+    new batch of candidate points is suggested by optimising the acquisition
+    function, the simulator is called to evaluate those points, and the
+    state is updated with the new observations.
+
+    Parameters:
+        Nsamples: Number of optimisation iterations (surrogate fit + suggest +
+            evaluate cycles).
+        batch_size: Number of new points to evaluate per iteration.
+        generate_acq_function: Callable with signature
+            ``(surrogate, state) -> acq_function`` that returns a BoTorch
+            acquisition function given the current surrogate and state.
+        state: :class:`~millefeuille.state.State` holding the initial data.
+            Modified **in-place** and also returned.
+        surrogate: A :class:`~millefeuille.surrogate.BaseSurrogate` instance.
+        simulator: A :class:`~millefeuille.simulator.PythonSimulator` or
+            :class:`~millefeuille.simulator.ExectuableSimulator` instance.
+        scheduler: Scheduler required when *simulator* is an
+            :class:`~millefeuille.simulator.ExectuableSimulator`; ``None``
+            otherwise.
+        csv_name: If provided, the state is incrementally saved to this CSV
+            file after each iteration via :meth:`~millefeuille.state.State.to_csv`.
+        verbose: If ``True``, passes verbose flag to
+            :func:`~millefeuille.optimise.suggest_next_locations`.
+        **kwargs: Additional keyword arguments forwarded to
+            :func:`~millefeuille.optimise.suggest_next_locations`.
+
+    Returns:
+        :class:`~millefeuille.state.State`: The updated state containing all
+        samples collected during the loop.
+
+    Raises:
+        Exception: If *simulator* is an
+            :class:`~millefeuille.simulator.ExectuableSimulator` but no
+            *scheduler* is provided.
+
+    Example:
+        >>> state = run_Bayesian_optimiser(
+        ...     Nsamples=10,
+        ...     batch_size=2,
+        ...     generate_acq_function=my_acq_fn_factory,
+        ...     state=initial_state,
+        ...     surrogate=gp_surrogate,
+        ...     simulator=my_simulator,
+        ... )
+    """
     if isinstance(simulator, ExectuableSimulator) and scheduler is None:
         print("If simulator is an ExecutableSimulator, you must provide a scheduler")
         raise Exception

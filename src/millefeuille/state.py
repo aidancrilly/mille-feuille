@@ -106,20 +106,56 @@ class StandardScaler(Standardize):
 
 @dataclass
 class State:
-    """
-    State containing information on problem and its progress
+    """Holds the complete state of an optimisation or sampling campaign.
 
-    input_domain = input space InputDomain
-    fidelity_domain = fidelity space FidelityDomain
+    ``State`` is the central data container in ``mille-feuille``.  It stores
+    all samples collected so far, tracks the best observed value, and provides
+    utilities for transforming inputs/outputs for surrogate training.
 
-    index = each sample is given an index (doesn't necessarily just count the samples)
-    Xs = input space samples
-    Ys = cost function values
-    Ps = additional scalar values to store
-    Ss = model fidelities of samples
+    Parameters:
+        input_domain: :class:`~millefeuille.domain.InputDomain` describing the
+            continuous/discrete input space.
+        index: Integer sample indices, shape ``(N, 1)`` or ``(N,)``.
+        Xs: Input (parameter) samples, shape ``(N, dim)``.
+        Ys: Objective function values, shape ``(N, n_objectives)``.
+        Ps: Optional additional scalar outputs, shape ``(N, n_params)`` or
+            ``None``.
+        Ss: Optional fidelity labels for each sample, shape ``(N, 1)`` or
+            ``None`` for single-fidelity problems.
+        index_names: Column names for ``index``; auto-generated if ``None``.
+        X_names: Column names for ``Xs``; auto-generated if ``None``.
+        Y_names: Column names for ``Ys``; auto-generated if ``None``.
+        P_names: Column names for ``Ps``; auto-generated if ``None``.
+        S_names: Column names for ``Ss``; auto-generated if ``None``.
+        Y_scaler: Output-space transformation (default:
+            :class:`StandardScaler`).  Fitted automatically during
+            :meth:`__post_init__`.
+        fidelity_domain: :class:`~millefeuille.domain.FidelityDomain` for
+            multi-fidelity problems; ``None`` for single-fidelity.
+        nsamples: Number of samples stored (populated automatically).
+        best_value: Best observed (raw) objective value seen so far.
+        best_value_transformed: Best objective value in scaled space.
 
-    Y_scaler = transformation on output space for training, e.g. standardise
+    Attributes:
+        dim: Dimensionality of the input space (from ``input_domain``).
+        l_MultiFidelity: ``True`` when a :attr:`fidelity_domain` is provided.
+        target_fidelity: Index of the target fidelity (multi-fidelity only).
+        fidelity_features: Per-fidelity feature dicts (multi-fidelity only).
 
+    Example:
+        >>> import numpy as np
+        >>> from millefeuille.domain import InputDomain
+        >>> from millefeuille.state import State
+        >>> domain = InputDomain(
+        ...     dim=1, b_low=np.array([0.0]), b_up=np.array([1.0]),
+        ...     steps=np.array([0.0])
+        ... )
+        >>> state = State(
+        ...     input_domain=domain,
+        ...     index=np.array([0, 1, 2]),
+        ...     Xs=np.array([[0.1], [0.5], [0.9]]),
+        ...     Ys=np.array([[1.0], [3.0], [2.0]]),
+        ... )
     """
 
     input_domain: type[InputDomain]
@@ -187,6 +223,20 @@ class State:
             self.nsamples = self.Ys.shape[0]
 
     def update(self, index_next, X_next, Y_next, S_next=None, P_next=None, refit_scaler=True):
+        """Append new samples to the state and update tracking statistics.
+
+        Parameters:
+            index_next: Indices for the new samples, shape ``(B,)`` or
+                ``(B, 1)``.
+            X_next: New input samples, shape ``(B, dim)``.
+            Y_next: New objective values, shape ``(B, n_objectives)``.
+            S_next: Fidelity labels for the new samples, shape ``(B, 1)`` or
+                ``None`` for single-fidelity problems.
+            P_next: Additional scalar outputs, shape ``(B, n_params)`` or
+                ``None``.
+            refit_scaler: If ``True`` (default), re-fit :attr:`Y_scaler` on
+                all ``Ys`` after appending.
+        """
         # Check for 1D arrays
         index_next, X_next, Y_next, P_next, S_next = check_for_2D_shape([index_next, X_next, Y_next, P_next, S_next])
 
@@ -215,6 +265,15 @@ class State:
         self.nsamples = self.Ys.shape[0]
 
     def get_bounds(self):
+        """Return the optimisation bounds as a ``(2, d)`` PyTorch tensor.
+
+        For single-fidelity problems ``d == dim``; for multi-fidelity problems
+        the fidelity bounds are appended as an extra column so ``d == dim + 1``.
+
+        Returns:
+            torch.Tensor: Bounds tensor of shape ``(2, d)`` on the appropriate
+            device and dtype, ready to pass to BoTorch optimisers.
+        """
         bounds = self.input_domain.get_bounds()
         if self.l_MultiFidelity:
             fidelity_bounds = self.fidelity_domain.get_bounds()
@@ -222,6 +281,18 @@ class State:
         return torch.tensor(bounds, dtype=dtype, device=device)
 
     def transform_XY(self):
+        """Return training tensors ``(X, Y)`` ready for surrogate fitting.
+
+        Inputs are scaled to ``[0, 1]^dim`` via :attr:`input_domain`.  For
+        multi-fidelity problems, fidelity labels are appended as an extra
+        column.  Outputs are transformed via :attr:`Y_scaler` (standardised by
+        default).
+
+        Returns:
+            tuple[torch.Tensor, torch.Tensor]: ``(X_torch, Y_torch)`` where
+            ``X_torch`` has shape ``(N, dim)`` (or ``(N, dim + 1)`` for
+            multi-fidelity) and ``Y_torch`` has shape ``(N, n_objectives)``.
+        """
         # Transform to [0,1]^d
         Xs_unit = self.input_domain.transform(self.Xs)
         # Append fidelities if multi-fidelity
@@ -236,6 +307,19 @@ class State:
         return X_torch, Y_torch
 
     def transform_X(self, X):
+        """Scale raw input samples for use with the surrogate model.
+
+        For multi-fidelity problems, the scaled inputs are tiled across all
+        fidelity levels and the corresponding fidelity index is appended as a
+        final column.
+
+        Parameters:
+            X: Raw input array of shape ``(N, dim)`` in parameter space.
+
+        Returns:
+            np.ndarray: Scaled array.  For single-fidelity: shape ``(N, dim)``;
+            for multi-fidelity: shape ``(N * num_fidelities, dim + 1)``.
+        """
         # Transform to input domain
         unit_X = self.input_domain.transform(X)
         if self.l_MultiFidelity:
@@ -247,12 +331,35 @@ class State:
         return unit_X
 
     def inverse_transform_X(self, unit_X):
+        """Map unit-hypercube inputs back to parameter space.
+
+        Parameters:
+            unit_X: Scaled input array of shape ``(N, dim)`` in
+                ``[0, 1]^dim``.
+
+        Returns:
+            np.ndarray: Array of shape ``(N, dim)`` in parameter space.
+        """
         # Transform to input domain
         X = self.input_domain.inverse_transform(unit_X)
 
         return X
 
     def inverse_transform_Y(self, scaled_Ys, scaled_Y_stds=None):
+        """Invert the output-space transformation.
+
+        Reverses the :attr:`Y_scaler` to return predictions in the original
+        (unscaled) objective space.
+
+        Parameters:
+            scaled_Ys: Scaled mean predictions, shape ``(N, n_objectives)``.
+            scaled_Y_stds: Scaled standard-deviation predictions, shape
+                ``(N, n_objectives)``.  Required when the scaler was fitted.
+
+        Returns:
+            tuple[np.ndarray, np.ndarray]: ``(unscaled_Ys, unscaled_stds)``
+            both of shape ``(N, n_objectives)``.
+        """
         # Inverse transform Y values to original space
         unscaled_Ys, unscaled_stds = self.Y_scaler.inverse_transform(scaled_Ys, scaled_Y_stds, return_torch=False)
         return unscaled_Ys, unscaled_stds
@@ -268,9 +375,22 @@ class State:
         return names
 
     def to_csv(self, filename: str):
-        """
-        Save index, Xs, Ps, Ss, Ys to a CSV file.
-        Appends only new rows if file exists.
+        """Save (or incrementally append) samples to a CSV file.
+
+        On the first call a new file is created with a header row.  On
+        subsequent calls only newly added rows (i.e. rows beyond those already
+        written) are appended, so the method is safe to call after every
+        :meth:`update` without duplicating data.
+
+        The column order is: ``index`` → ``Ss`` (if present) → ``Xs`` →
+        ``Ps`` (if present) → ``Ys``.
+
+        Parameters:
+            filename: Path to the output CSV file.
+
+        Raises:
+            ValueError: If :attr:`index`, :attr:`Xs`, or :attr:`Ys` is
+                ``None``.
         """
         # Check arrays
         if self.index is None or self.Xs is None or self.Ys is None:
@@ -318,6 +438,18 @@ class State:
             writer.writerows(new_data)
 
     def save(self, filename: str):
+        """Serialise the state to an HDF5 file.
+
+        Stores the input domain bounds, optional fidelity domain metadata, all
+        sample arrays (``index``, ``Xs``, ``Ys``, ``Ps``, ``Ss``), column
+        names, and tracking statistics (``nsamples``, ``best_value``,
+        ``best_value_transformed``).
+
+        Use :meth:`load` to restore the state from file.
+
+        Parameters:
+            filename: Path for the output ``.h5`` / ``.hdf5`` file.
+        """
         # Use variable-length UTF-8 strings for names
         str_dt = h5py.string_dtype(encoding="utf-8")
 
@@ -398,6 +530,16 @@ class State:
 
     @staticmethod
     def load(filename: str, Y_scaler: None | object):
+        """Restore a :class:`State` from an HDF5 file created by :meth:`save`.
+
+        Parameters:
+            filename: Path to the ``.h5`` / ``.hdf5`` file.
+            Y_scaler: Output-space scaler to use after loading.  Pass ``None``
+                to use the default :class:`StandardScaler`.
+
+        Returns:
+            State: A fully initialised :class:`State` instance.
+        """
         def _read_list_of_str(fobj, key):
             if key in fobj:
                 raw = fobj[key][:]

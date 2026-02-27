@@ -24,6 +24,12 @@ dev = [
     "pytest-cases",
     "f90nml",
 ]
+docs = [
+    "sphinx",
+    "sphinx-rtd-theme",
+    "sphinx-autodoc-typehints",
+    "myst-parser",
+]
 
 [build-system]
 requires = ["setuptools", "wheel"]

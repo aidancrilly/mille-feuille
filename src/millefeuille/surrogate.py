@@ -199,11 +199,35 @@ class BaseGPSurrogate(BaseSurrogate, ABC):
 
 
 class SingleFidelityGPSurrogate(BaseGPSurrogate):
+    """Single-fidelity Gaussian Process surrogate built on BoTorch's :class:`~botorch.models.SingleTaskGP`.
+
+    Trains a GP with a :class:`~gpytorch.kernels.ScaleKernel`-wrapped kernel
+    (default: RBF with ARD) and a Gaussian likelihood using exact marginal
+    log-likelihood optimisation.
+
+    Inherits all constructor parameters from
+    :class:`BaseGPSurrogate`.
+
+    Example:
+        >>> from millefeuille.surrogate import SingleFidelityGPSurrogate
+        >>> surrogate = SingleFidelityGPSurrogate()
+        >>> surrogate.fit(state)
+        >>> preds = surrogate.predict(state, X_test)
+        >>> mean, std = preds["mean"], preds["std"]
+    """
+
     def init_GP_model(
         self,
         state: State,
         **kwargs,
     ):
+        """Initialise the :class:`~botorch.models.SingleTaskGP` from the current state.
+
+        Parameters:
+            state: Current :class:`~millefeuille.state.State`.
+            **kwargs: Extra keyword arguments forwarded to
+                :class:`~botorch.models.SingleTaskGP`.
+        """
         covar_module = self._get_covar_module(state.dim)
 
         X_torch, Y_torch = self.get_XY(state)
@@ -220,6 +244,18 @@ class SingleFidelityGPSurrogate(BaseGPSurrogate):
         self.update_state_dicts()
 
     def fit(self, state: State, max_retries=1, approx_mll=False, **kwargs):
+        """Fit the GP to the data stored in *state*.
+
+        Initialises the model then maximises the exact marginal log-likelihood
+        using BoTorch's :func:`~botorch.fit.fit_gpytorch_mll`.
+
+        Parameters:
+            state: Current :class:`~millefeuille.state.State`.
+            max_retries: Number of fitting attempts before giving up on a
+                :exc:`RuntimeError` (default: ``1``).
+            approx_mll: If ``True``, use an approximate MLL for large datasets.
+            **kwargs: Extra keyword arguments forwarded to :meth:`init_GP_model`.
+        """
         self.init_GP_model(state, **kwargs)
 
         mll = ExactMarginalLogLikelihood(self.model.likelihood, self.model)
@@ -233,6 +269,17 @@ class SingleFidelityGPSurrogate(BaseGPSurrogate):
                 print(f"Fitting failed (attempt {attempt + 1}), retrying… {e}")
 
     def predict(self, state: State, Xs):
+        """Return posterior mean and standard deviation at new input points.
+
+        Parameters:
+            state: Current :class:`~millefeuille.state.State` (used for
+                input/output transforms).
+            Xs: Input array of shape ``(N, dim)`` in parameter space.
+
+        Returns:
+            dict: ``{"mean": np.ndarray, "std": np.ndarray}`` both of shape
+            ``(N, 1)`` in the original (unscaled) output space.
+        """
         # Get transformed model inputs on the device
         Xs_unit = state.transform_X(Xs)
         test_X = torch.tensor(Xs_unit, dtype=torch.double, device=device)
@@ -255,11 +302,38 @@ class SingleFidelityGPSurrogate(BaseGPSurrogate):
 
 
 class MultiFidelityGPSurrogate(BaseGPSurrogate):
+    """Multi-fidelity Gaussian Process surrogate built on BoTorch's :class:`~botorch.models.multitask.MultiTaskGP`.
+
+    Treats the fidelity level as a task feature (appended as the last column of
+    the input).  Lower fidelities are correlated with the target fidelity via a
+    shared kernel structure, enabling cheap low-fidelity evaluations to inform
+    expensive high-fidelity predictions.
+
+    Inherits all constructor parameters from
+    :class:`BaseGPSurrogate`.
+
+    Example:
+        >>> from millefeuille.surrogate import MultiFidelityGPSurrogate
+        >>> surrogate = MultiFidelityGPSurrogate()
+        >>> surrogate.fit(state)          # state must have fidelity_domain set
+        >>> preds = surrogate.predict(state, X_test)
+        >>> # preds is a dict keyed by fidelity index
+        >>> mean_hf = preds[state.target_fidelity]["mean"]
+    """
+
     def init_GP_model(
         self,
         state: State,
         **kwargs,
     ):
+        """Initialise the :class:`~botorch.models.multitask.MultiTaskGP` from the current state.
+
+        Parameters:
+            state: Current :class:`~millefeuille.state.State`; must have a
+                :attr:`~millefeuille.state.State.fidelity_domain` set.
+            **kwargs: Extra keyword arguments forwarded to
+                :class:`~botorch.models.multitask.MultiTaskGP`.
+        """
         covar_module = self._get_covar_module(state.dim)
 
         X_torch, Y_torch = self.get_XY(state)
@@ -277,6 +351,16 @@ class MultiFidelityGPSurrogate(BaseGPSurrogate):
         self.update_state_dicts()
 
     def fit(self, state: State, approx_mll=False, max_retries=1, **kwargs):
+        """Fit the multi-fidelity GP to the data stored in *state*.
+
+        Parameters:
+            state: Current :class:`~millefeuille.state.State`; must contain
+                multi-fidelity samples (``Ss`` array).
+            approx_mll: If ``True``, use an approximate MLL for large datasets.
+            max_retries: Number of fitting attempts before giving up on a
+                :exc:`RuntimeError` (default: ``1``).
+            **kwargs: Extra keyword arguments forwarded to :meth:`init_GP_model`.
+        """
         self.init_GP_model(state, **kwargs)
 
         mll = ExactMarginalLogLikelihood(self.model.likelihood, self.model)
@@ -290,6 +374,17 @@ class MultiFidelityGPSurrogate(BaseGPSurrogate):
                 print(f"Fitting failed (attempt {attempt + 1}), retrying... {e}")
 
     def predict(self, state: State, Xs):
+        """Return posterior mean and std at new inputs for all fidelity levels.
+
+        Parameters:
+            state: Current :class:`~millefeuille.state.State`.
+            Xs: Input array of shape ``(N, dim)`` in parameter space.
+
+        Returns:
+            dict: Keys are fidelity indices ``0, 1, ..., F-1``.  Each value is
+            a nested dict ``{"mean": np.ndarray, "std": np.ndarray}`` of shape
+            ``(N,)`` in the original (unscaled) output space.
+        """
         # Transform inputs -> this duplicates across fidelities
         Xs_unit = state.transform_X(Xs)  # shape: (N * num_fidelities, d+1), last index of second axis is fidelity
         test_X = torch.tensor(Xs_unit, dtype=torch.double, device=device)
@@ -540,12 +635,49 @@ class BaseEnsemblePyTorchSurrogate(BaseSurrogate, ABC):
 
 
 class SingleFidelityEnsembleSurrogate(BaseEnsemblePyTorchSurrogate):
+    """Single-fidelity surrogate backed by an ensemble of PyTorch neural networks.
+
+    Uses :class:`EnsemblePyTorchModel` (a BoTorch
+    :class:`~botorch.models.ensemble.EnsembleModel`) to obtain uncertainty
+    estimates from the variance across ensemble members.
+
+    Inherits all constructor parameters from
+    :class:`BaseEnsemblePyTorchSurrogate`.
+
+    Example:
+        >>> from millefeuille.surrogate import SingleFidelityEnsembleSurrogate
+        >>> surrogate = SingleFidelityEnsembleSurrogate(
+        ...     ensemble_size=5,
+        ...     model_base_class=MyNet,
+        ...     training_epochs=100,
+        ...     batch_size=32,
+        ... )
+        >>> surrogate.fit(state)
+        >>> preds = surrogate.predict(state, X_test)
+        >>> mean, std = preds["mean"], preds["std"]
+    """
+
     def fit(self, state: State):
+        """Fit the ensemble to the data stored in *state*.
+
+        Parameters:
+            state: Current :class:`~millefeuille.state.State`.
+        """
         X_torch, Y_torch = self.get_XY(state)
 
         self.model.fit(X_torch, Y_torch)
 
     def predict(self, state: State, Xs):
+        """Return ensemble mean and standard deviation at new input points.
+
+        Parameters:
+            state: Current :class:`~millefeuille.state.State`.
+            Xs: Input array of shape ``(N, dim)`` in parameter space.
+
+        Returns:
+            dict: ``{"mean": np.ndarray, "std": np.ndarray}`` both of shape
+            ``(N, 1)`` in the original (unscaled) output space.
+        """
         Xs_unit = state.transform_X(Xs)
         test_X = torch.tensor(Xs_unit, dtype=dtype, device=device)
         with torch.no_grad():
