@@ -167,8 +167,8 @@ def test_optimise_singlefidelity_RF(singlefidelitysample, batch_size, generate_a
 
     # since RF is non-deterministic and may not find the best point first time
     assert (
-    np.isclose(new_state.best_value, state.best_value, atol=0.1) or 
-    new_state.best_value.item() > state.best_value.item()
+        np.isclose(new_state.best_value, state.best_value, atol=0.1)
+        or new_state.best_value.item() > state.best_value.item()
     )
 
 
