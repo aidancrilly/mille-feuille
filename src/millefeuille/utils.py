@@ -228,27 +228,32 @@ def probabilistic_threshold_sampling_with_exclusion(
             eigenvalues = np.maximum(eigenvalues, 1e-10)
             x_normalised[cluster_mask] = x_centered @ eigenvectors / np.sqrt(eigenvalues)
 
-    # Step 4: Greedy selection with rejection based on distance in normalised space
-    # Prioritise highest-probability candidates
+    # Step 4: Greedy selection with rejection based on distance in normalised space.
+    # Exclusion is applied within each cluster independently, since the PCA
+    # normalised coordinates have different origins and scales per cluster.
+    # Prioritise highest-probability candidates.
     sort_idx = np.argsort(-prob_candidates)
 
     selected_indices = []
-    selected_normalised = []
+    # Map cluster label -> list of already-selected normalised coordinates in that cluster
+    selected_normalised_per_cluster = {k: [] for k in range(n_clusters_actual)}
 
     for idx in sort_idx:
         if len(selected_indices) >= batch_size:
             break
 
+        cluster_k = labels[idx]
         x_norm_i = x_normalised[idx]
+        already_selected = selected_normalised_per_cluster[cluster_k]
 
-        if len(selected_normalised) == 0:
+        if len(already_selected) == 0:
             selected_indices.append(idx)
-            selected_normalised.append(x_norm_i)
+            already_selected.append(x_norm_i)
         else:
-            dists = np.linalg.norm(np.array(selected_normalised) - x_norm_i, axis=1)
+            dists = np.linalg.norm(np.array(already_selected) - x_norm_i, axis=1)
             if np.all(dists >= rejection_radius):
                 selected_indices.append(idx)
-                selected_normalised.append(x_norm_i)
+                already_selected.append(x_norm_i)
 
     if len(selected_indices) == 0:
         return np.empty((0, n_dims)), np.empty(0), np.empty(0)
