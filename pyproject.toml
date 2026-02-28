@@ -13,6 +13,9 @@ dependencies = [
     "numpy",
     "scikit-learn",
     "scipy",
+    "jax",
+    "equinox",
+    "optax",
 ]
 requires-python = ">=3.11"
 dynamic = ["version"]
