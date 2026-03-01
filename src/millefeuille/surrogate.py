@@ -18,14 +18,12 @@ from gpytorch.module import Module
 from torch import Tensor
 from torch.utils.data import DataLoader, TensorDataset, random_split
 
+from .definitions import device, dtype
 from .state import State
 
 """
 Defines a number of surrogate models
 """
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-dtype = torch.double
 
 
 class BaseSurrogate(ABC):
@@ -235,7 +233,7 @@ class SingleFidelityGPSurrogate(BaseGPSurrogate):
     def predict(self, state: State, Xs):
         # Get transformed model inputs on the device
         Xs_unit = state.transform_X(Xs)
-        test_X = torch.tensor(Xs_unit, dtype=torch.double, device=device)
+        test_X = torch.tensor(Xs_unit, dtype=dtype, device=device)
 
         # Switch to evaluation mode for predictions
         self.eval()
@@ -292,7 +290,7 @@ class MultiFidelityGPSurrogate(BaseGPSurrogate):
     def predict(self, state: State, Xs):
         # Transform inputs -> this duplicates across fidelities
         Xs_unit = state.transform_X(Xs)  # shape: (N * num_fidelities, d+1), last index of second axis is fidelity
-        test_X = torch.tensor(Xs_unit, dtype=torch.double, device=device)
+        test_X = torch.tensor(Xs_unit, dtype=dtype, device=device)
 
         with torch.no_grad():
             post = self.model.posterior(test_X)
