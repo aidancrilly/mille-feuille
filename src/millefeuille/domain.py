@@ -106,12 +106,13 @@ class InputDomain:
         Returns:
             float or np.ndarray: Normalized value(s) in [0, 1]. Shape matches input value.
         """
+        scalar_input = np.ndim(value) == 0
         # Scale to [0,1]
         value = (value - self.b_low[feature_index]) / (self.b_up[feature_index] - self.b_low[feature_index])
         # Catch floating point errors
         value = np.where(np.isclose(value, 0.0), 0.0, value)
         value = np.where(np.isclose(value, 1.0), 1.0, value)
-        return value
+        return value if not scalar_input else value.item()
 
     def inverse_transform_feature(self, feature_index, value):
         """Transform feature values from normalized [0, 1] units to real units.
