@@ -15,9 +15,12 @@ def generate_batch(
     num_restarts,
     raw_samples,
     optimizer_options,
+    fixed_features=None,
 ):
     # Generate new candidates
     if state.l_MultiFidelity:
+        if fixed_features is not None:
+            raise ValueError("fixed_features is only supported for single fidelity optimisation")
         X_next, _ = optimize_acqf_mixed(
             acq_function=acq_function,
             bounds=state.get_bounds(),
@@ -35,6 +38,7 @@ def generate_batch(
             num_restarts=num_restarts,
             raw_samples=raw_samples,
             options=optimizer_options,
+            fixed_features=fixed_features,
         )
 
     return X_next
@@ -47,6 +51,7 @@ def suggest_next_locations(
     num_restarts=DEFAULT_NUM_RESTARTS,
     raw_samples=DEFAULT_RAW_SAMPLES,
     optimizer_options=None,
+    fixed_features=None,
     verbose=False,
 ):
     # Check inputs
@@ -64,6 +69,7 @@ def suggest_next_locations(
         num_restarts=num_restarts,
         raw_samples=raw_samples,
         optimizer_options=optimizer_options,
+        fixed_features=fixed_features,
     )
 
     if verbose:
