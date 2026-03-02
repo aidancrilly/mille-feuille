@@ -123,8 +123,8 @@ def test_optimise_singlefidelity_GP(singlefidelitysample, batch_size, generate_a
 def test_optimise_singlefidelity_GP_fixed_features(singlefidelitysample, batch_size, generate_acq_function):
     Is, Xs, Ys, f = singlefidelitysample
 
-    # Use a 2D domain to have a non-trivial fixed feature
-    domain_2d = InputDomain(dim=2, b_low=np.array([0.0, 0.0]), b_up=np.array([1.0, 1.0]), steps=np.array([0.0, 0.0]))
+    # Use a 2D domain with non-unit bounds to test real-unit fixed_features transformation
+    domain_2d = InputDomain(dim=2, b_low=np.array([0.0, 0.0]), b_up=np.array([1.0, 10.0]), steps=np.array([0.0, 0.0]))
     Xs_2d = np.hstack([Xs, np.zeros_like(Xs)])
     state_2d = State(domain_2d, Is, Xs_2d, Ys)
 
@@ -133,8 +133,8 @@ def test_optimise_singlefidelity_GP_fixed_features(singlefidelitysample, batch_s
 
     acq_function = generate_acq_function(surrogate, state_2d)
 
-    # Fix the second feature (index 1) to 0.5
-    fixed_features = {1: 0.5}
+    # Fix the second feature (index 1) to 5.0 in real units (= 0.5 in normalised units)
+    fixed_features = {1: 5.0}
     X_next = suggest_next_locations(
         batch_size,
         state_2d,
@@ -145,7 +145,7 @@ def test_optimise_singlefidelity_GP_fixed_features(singlefidelitysample, batch_s
     )
     assert X_next.shape[0] == batch_size, "suggest_next_locations do not return batch_size candidates"
     assert X_next.shape[1] == Xs_2d.shape[1], "suggest_next_locations candidates did not have same dimension as problem"
-    assert np.allclose(X_next[:, 1], 0.5), "fixed feature should be fixed at the specified value"
+    assert np.allclose(X_next[:, 1], 5.0), "fixed feature should be fixed at the specified real-unit value"
 
 
 @pytest.mark.unit

@@ -31,6 +31,12 @@ def generate_batch(
             options=optimizer_options,
         )
     else:
+        # Transform fixed_features values from real units to normalised [0, 1] units
+        normalised_fixed_features = None
+        if fixed_features is not None:
+            normalised_fixed_features = {
+                idx: state.input_domain.transform_feature(idx, val) for idx, val in fixed_features.items()
+            }
         X_next, _ = optimize_acqf(
             acq_function,
             bounds=state.get_bounds(),
@@ -38,7 +44,7 @@ def generate_batch(
             num_restarts=num_restarts,
             raw_samples=raw_samples,
             options=optimizer_options,
-            fixed_features=fixed_features,
+            fixed_features=normalised_fixed_features,
         )
 
     return X_next

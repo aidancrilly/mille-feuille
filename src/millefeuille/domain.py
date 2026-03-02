@@ -52,6 +52,30 @@ class InputDomain:
                 X_scaled[:, n] = np.rint(X_scaled[:, n] / self.steps[n]) * self.steps[n]
         return X_scaled
 
+    def transform_feature(self, feature_index, value):
+        """Transform a single feature value from real units to normalised [0, 1] units.
+
+        Parameters:
+            feature_index (int): index of the feature dimension to transform.
+            value (float): the feature value in real units.
+
+        Returns:
+            float: the normalised value in [0, 1].
+        """
+        return (value - self.b_low[feature_index]) / (self.b_up[feature_index] - self.b_low[feature_index])
+
+    def inverse_transform_feature(self, feature_index, value):
+        """Inverse transform a single feature value from normalised [0, 1] units to real units.
+
+        Parameters:
+            feature_index (int): index of the feature dimension to transform.
+            value (float): the normalised feature value in [0, 1].
+
+        Returns:
+            float: the feature value in real units.
+        """
+        return (self.b_up[feature_index] - self.b_low[feature_index]) * value + self.b_low[feature_index]
+
 
 @dataclass
 class FidelityDomain:

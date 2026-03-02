@@ -63,3 +63,23 @@ def test_mixed_domain(nsample, dim, b_low, b_up):
 
     for i in range(X_discrete.shape[1]):
         assert np.isclose(X_discrete[:, i], X[:, dim // 2 + i], rtol=0.0, atol=steps[dim // 2 + i] / 2.0).all()
+
+
+@pytest.mark.unit
+def test_transform_feature(dim, b_low, b_up):
+    domain = InputDomain(dim=dim, b_low=b_low, b_up=b_up, steps=np.zeros_like(b_low))
+
+    for n in range(dim):
+        # Real value at midpoint should map to 0.5
+        mid_real = 0.5 * (b_low[n] + b_up[n])
+        mid_unit = domain.transform_feature(n, mid_real)
+        assert np.isclose(mid_unit, 0.5), f"transform_feature midpoint failed for dim {n}"
+
+        # Bounds
+        assert np.isclose(domain.transform_feature(n, b_low[n]), 0.0)
+        assert np.isclose(domain.transform_feature(n, b_up[n]), 1.0)
+
+        # Round-trip
+        for unit_val in [0.0, 0.25, 0.5, 0.75, 1.0]:
+            real_val = domain.inverse_transform_feature(n, unit_val)
+            assert np.isclose(domain.transform_feature(n, real_val), unit_val)
