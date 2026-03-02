@@ -8,4 +8,5 @@ from .optimise import *
 from .simulator import *
 from .state import *
 from .surrogate import *
+from .tasks import *
 from .utils import *
