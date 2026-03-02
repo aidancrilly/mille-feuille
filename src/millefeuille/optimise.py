@@ -15,6 +15,7 @@ def generate_batch(
     num_restarts,
     raw_samples,
     optimizer_options,
+    fixed_features=None,
 ):
     # Check for non-gradable surrogate
     if hasattr(acq_function.model, "no_grad"):
@@ -26,6 +27,8 @@ def generate_batch(
 
     # Generate new candidates
     if state.l_MultiFidelity:
+        if fixed_features is not None:
+            raise ValueError("fixed_features is only supported for single fidelity optimisation")
         X_next, _ = optimize_acqf_mixed(
             acq_function=acq_function,
             bounds=state.get_bounds(),
@@ -36,6 +39,12 @@ def generate_batch(
             options=optimizer_options,
         )
     else:
+        # Transform fixed_features values from real units to normalised [0, 1] units
+        normalised_fixed_features = None
+        if fixed_features is not None:
+            normalised_fixed_features = {
+                idx: state.input_domain.transform_feature(idx, val) for idx, val in fixed_features.items()
+            }
         X_next, _ = optimize_acqf(
             acq_function,
             bounds=state.get_bounds(),
@@ -43,6 +52,7 @@ def generate_batch(
             num_restarts=num_restarts,
             raw_samples=raw_samples,
             options=optimizer_options,
+            fixed_features=normalised_fixed_features,
         )
 
     return X_next
@@ -55,6 +65,7 @@ def suggest_next_locations(
     num_restarts=DEFAULT_NUM_RESTARTS,
     raw_samples=DEFAULT_RAW_SAMPLES,
     optimizer_options=None,
+    fixed_features=None,
     verbose=False,
 ):
     # Check inputs
@@ -72,6 +83,7 @@ def suggest_next_locations(
         num_restarts=num_restarts,
         raw_samples=raw_samples,
         optimizer_options=optimizer_options,
+        fixed_features=fixed_features,
     )
 
     if verbose:
