@@ -1,7 +1,6 @@
 import millefeuille as mf
 import numpy as np
 from Simulator import Simulator
-
 from Utils import read_domainfile
 
 EXECUTABLE = "path_to_your_executable"
