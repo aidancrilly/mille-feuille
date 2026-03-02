@@ -15,17 +15,16 @@ from gpytorch.kernels import Kernel, RBFKernel, ScaleKernel
 from gpytorch.likelihoods import GaussianLikelihood
 from gpytorch.mlls import ExactMarginalLogLikelihood
 from gpytorch.module import Module
+from sklearn.ensemble import RandomForestRegressor
 from torch import Tensor
 from torch.utils.data import DataLoader, TensorDataset, random_split
 
+from .definitions import device, dtype
 from .state import State
 
 """
 Defines a number of surrogate models
 """
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-dtype = torch.double
 
 
 class BaseSurrogate(ABC):
@@ -50,6 +49,13 @@ class BaseSurrogate(ABC):
             - If multi-objective: dict {key: (mean, std)}
         """
         pass
+
+    def print_fit_summary(self):
+        """
+        Print a summary of the fitted model parameters.
+        Subclasses should override this to provide model-specific information.
+        """
+        print("Surrogate fit summary: No details available for this surrogate type.")
 
     def get_XY(self, state: State, output_key: str | None = None):
         """
@@ -108,9 +114,11 @@ class BaseGPSurrogate(BaseSurrogate, ABC):
         lengthscale_interval=DEFAULT_LENGTHSCALE_INTERVAL,
         noise_interval=DEFAULT_NOISE_INTERVAL,
         outputscale_interval=None,
+        verbose: bool = False,
     ):
         self.model = None
         self.state_dicts = None
+        self.verbose = verbose
 
         self.noise_interval = noise_interval
         self.lengthscale_interval = lengthscale_interval
@@ -232,10 +240,23 @@ class SingleFidelityGPSurrogate(BaseGPSurrogate):
             except RuntimeError as e:
                 print(f"Fitting failed (attempt {attempt + 1}), retrying… {e}")
 
+        if self.verbose:
+            self.print_fit_summary()
+
+    def print_fit_summary(self):
+        """
+        Print noise level and length scales of the fitted GP.
+        """
+        noise = self.model.likelihood.noise.item()
+        lengthscales = self.model.covar_module.base_kernel.lengthscale.detach().cpu().numpy().flatten()
+        print("SingleFidelityGPSurrogate fit summary:")
+        print(f"  Noise level:   {noise:.6e}")
+        print(f"  Length scales: {lengthscales}")
+
     def predict(self, state: State, Xs):
         # Get transformed model inputs on the device
         Xs_unit = state.transform_X(Xs)
-        test_X = torch.tensor(Xs_unit, dtype=torch.double, device=device)
+        test_X = torch.tensor(Xs_unit, dtype=dtype, device=device)
 
         # Switch to evaluation mode for predictions
         self.eval()
@@ -289,10 +310,23 @@ class MultiFidelityGPSurrogate(BaseGPSurrogate):
             except RuntimeError as e:
                 print(f"Fitting failed (attempt {attempt + 1}), retrying... {e}")
 
+        if self.verbose:
+            self.print_fit_summary()
+
+    def print_fit_summary(self):
+        """
+        Print noise level and length scales of the fitted multi-fidelity GP.
+        """
+        noise = self.model.likelihood.noise.item()
+        lengthscales = self.model.covar_module.base_kernel.lengthscale.detach().cpu().numpy().flatten()
+        print("MultiFidelityGPSurrogate fit summary:")
+        print(f"  Noise level:   {noise:.6e}")
+        print(f"  Length scales: {lengthscales}")
+
     def predict(self, state: State, Xs):
         # Transform inputs -> this duplicates across fidelities
         Xs_unit = state.transform_X(Xs)  # shape: (N * num_fidelities, d+1), last index of second axis is fidelity
-        test_X = torch.tensor(Xs_unit, dtype=torch.double, device=device)
+        test_X = torch.tensor(Xs_unit, dtype=dtype, device=device)
 
         with torch.no_grad():
             post = self.model.posterior(test_X)
@@ -479,9 +513,11 @@ class BaseEnsemblePyTorchSurrogate(BaseSurrogate, ABC):
         loss: type[nn.Module] | None = None,
         reset_before_training: bool = True,
         variance_calibration: float = 1.0,
+        verbose: bool = False,
     ):
         self.model_base_class = model_base_class
         self.ensemble_size = ensemble_size
+        self.verbose = verbose
 
         if train_test_split is None:
             train_test_split = [0.7, 0.3]
@@ -545,6 +581,25 @@ class SingleFidelityEnsembleSurrogate(BaseEnsemblePyTorchSurrogate):
 
         self.model.fit(X_torch, Y_torch)
 
+        if self.verbose:
+            with torch.no_grad():
+                post = self.model.posterior(X_torch.unsqueeze(1))
+                mean = post.mean.reshape(-1, 1)
+            Y_flat = Y_torch.reshape(-1, 1)
+            ss_res = ((Y_flat - mean) ** 2).sum().item()
+            ss_tot = ((Y_flat - Y_flat.mean()) ** 2).sum().item()
+            self._fit_mse = ss_res / Y_flat.numel()
+            self._fit_r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else float("nan")
+            self.print_fit_summary()
+
+    def print_fit_summary(self):
+        """
+        Print MSE and R2 of the ensemble on the training data.
+        """
+        print("SingleFidelityEnsembleSurrogate fit summary:")
+        print(f"  MSE: {self._fit_mse:.6e}")
+        print(f"  R2:  {self._fit_r2:.6f}")
+
     def predict(self, state: State, Xs):
         Xs_unit = state.transform_X(Xs)
         test_X = torch.tensor(Xs_unit, dtype=dtype, device=device)
@@ -555,3 +610,113 @@ class SingleFidelityEnsembleSurrogate(BaseEnsemblePyTorchSurrogate):
             std = np.sqrt(var)
         mean, std = state.inverse_transform_Y(mean, std)
         return {"mean": mean, "std": std}
+
+
+##################################################
+############ Random Forest Surrogate #############
+##################################################
+
+
+class RandomForestEnsembleModel(EnsembleModel):
+    """
+    BoTorch EnsembleModel wrapping a scikit-learn RandomForestRegressor.
+    Each decision tree in the forest acts as one ensemble member.
+    """
+
+    def __init__(self, n_estimators: int = 100, max_depth: int | None = None, **rf_kwargs):
+        super().__init__()
+        self._num_outputs = 1
+        self.rf = RandomForestRegressor(n_estimators=n_estimators, max_depth=max_depth, **rf_kwargs)
+
+    @property
+    def no_grad(self) -> bool:
+        return True
+
+    def fit(self, X: Tensor, y: Tensor) -> None:
+        X_np = X.cpu().double().numpy()
+        y_np = y.cpu().double().numpy().reshape(-1)
+        self.rf.fit(X_np, y_np)
+
+    def forward(self, X: Tensor) -> Tensor:
+        # X shape: (*batch_shape, q, D)
+        X_np = X.cpu().double().numpy()
+        N, q, D = X.shape  # Samples, q-batch, Feature
+
+        X_flat = X_np.reshape(-1, D)
+
+        # Collect predictions from each tree: (n_estimators, prod(batch_shape)*q)
+        tree_preds = np.array([est.predict(X_flat) for est in self.rf.estimators_])
+
+        # Reshape to (n_estimators, N, q)
+        tree_preds = tree_preds.reshape(len(self.rf.estimators_), N, q)
+
+        # Transpose to (N, n_estimators, q) then add output dim
+        tree_preds = np.transpose(tree_preds, [1, 0, 2])  # (N, n_estimators, q)
+        # Add output dimension: (N, n_estimators, q, m=1)
+        tree_preds = tree_preds[..., np.newaxis]
+
+        return torch.tensor(tree_preds, dtype=X.dtype, device=X.device)
+
+
+class SingleFidelityRandomForestSurrogate(BaseSurrogate):
+    """
+    Single-fidelity surrogate using a Random Forest ensemble via BoTorch's EnsembleModel.
+
+    Hyperparameters
+    ---------------
+    n_estimators : int
+        Number of trees in the forest (default: 100).
+    max_depth : int or None
+        Maximum depth of each tree. None means nodes are expanded until all
+        leaves are pure or contain fewer than min_samples_split samples.
+    rf_kwargs : dict
+        Additional keyword arguments forwarded to
+        ``sklearn.ensemble.RandomForestRegressor``.
+    """
+
+    def __init__(self, n_estimators: int = 100, max_depth: int | None = None, verbose: bool = False, **rf_kwargs):
+        self.model = RandomForestEnsembleModel(n_estimators=n_estimators, max_depth=max_depth, **rf_kwargs)
+        self.verbose = verbose
+
+    def fit(self, state: State):
+        X_torch, Y_torch = self.get_XY(state)
+        self.model.fit(X_torch, Y_torch)
+
+        if self.verbose:
+            X_np = X_torch.cpu().double().numpy()
+            Y_np = Y_torch.cpu().double().numpy().reshape(-1)
+            Y_pred = self.model.rf.predict(X_np)
+            ss_res = float(((Y_np - Y_pred) ** 2).sum())
+            ss_tot = float(((Y_np - Y_np.mean()) ** 2).sum())
+            self._fit_mse = ss_res / len(Y_np)
+            self._fit_r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else float("nan")
+            self.print_fit_summary()
+
+    def print_fit_summary(self):
+        """
+        Print MSE and R2 of the random forest on the training data.
+        """
+        print("SingleFidelityRandomForestSurrogate fit summary:")
+        print(f"  MSE: {self._fit_mse:.6e}")
+        print(f"  R2:  {self._fit_r2:.6f}")
+
+    def predict(self, state: State, Xs):
+        Xs_unit = state.transform_X(Xs)
+        test_X = torch.tensor(Xs_unit, dtype=dtype, device=device)
+        with torch.no_grad():
+            post = self.model.posterior(test_X.unsqueeze(1))
+            mean = post.mean.cpu().numpy().reshape(-1, 1)
+            var = post.variance.cpu().numpy().reshape(-1, 1)
+            std = np.sqrt(var)
+        mean, std = state.inverse_transform_Y(mean, std)
+        return {"mean": mean, "std": std}
+
+    def eval(self):
+        pass
+
+    def save(self, filepath: str):
+        torch.save({"rf": self.model.rf}, filepath)
+
+    def load(self, filepath: str, eval=True):
+        checkpoint = torch.load(filepath, weights_only=False, map_location=device)
+        self.model.rf = checkpoint["rf"]

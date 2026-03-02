@@ -6,7 +6,7 @@ from millefeuille.domain import FidelityDomain
 from millefeuille.initialise import generate_initial_sample
 from millefeuille.state import State
 from millefeuille.surrogate import MultiFidelityGPSurrogate, SingleFidelityGPSurrogate
-from millefeuille.utils import probabilistic_threshold_sampling
+from millefeuille.utils import probabilistic_threshold_sampling, probabilistic_threshold_sampling_with_exclusion
 
 from .conftest import (
     TEST_KERNEL,
@@ -102,3 +102,66 @@ def test_multifidelity_probabilistic_threshold_sampling(multifidelitysample, ini
         assert np.all(prob <= 1.0) and np.all(prob >= 0.0), (
             "probabilistic_threshold_sampling returning impossible prob values"
         )
+
+
+@pytest_cases.fixture(params=[3])
+def batch_size(request):
+    return request.param
+
+
+@pytest_cases.fixture(params=[0.5])
+def rejection_radius(request):
+    return request.param
+
+
+@pytest.mark.unit
+def test_singlefidelity_probabilistic_threshold_sampling_with_exclusion(
+    singlefidelitysample, threshold_value, batch_size, rejection_radius
+):
+    Is, Xs, Ys = singlefidelitysample
+
+    state = State(ForresterDomain, Is, Xs, Ys)
+
+    surrogate = SingleFidelityGPSurrogate()
+    surrogate.fit(state)
+
+    sampler = Uniform(ForresterDomain.dim)
+
+    # Use a larger pool of candidates so the exclusion logic is exercised
+    large_initial_samples = 50
+    x_sel, y_sel, prob_sel = probabilistic_threshold_sampling_with_exclusion(
+        ForresterDomain, state, sampler, surrogate, large_initial_samples, threshold_value, batch_size, rejection_radius
+    )
+
+    # Number of selected points must not exceed batch_size
+    assert len(x_sel) <= batch_size, "More points returned than batch_size"
+
+    # Probabilities must be in [0, 1]
+    assert np.all(prob_sel <= 1.0) and np.all(prob_sel >= 0.0), (
+        "probabilistic_threshold_sampling_with_exclusion returning impossible prob values"
+    )
+
+    # Shapes of returned arrays must be consistent
+    assert x_sel.shape == (len(x_sel), ForresterDomain.dim)
+    assert y_sel.shape == (len(x_sel),)
+    assert prob_sel.shape == (len(x_sel),)
+
+
+@pytest.mark.unit
+def test_probabilistic_threshold_sampling_with_exclusion_empty(singlefidelitysample):
+    """When no candidates pass the threshold, empty arrays should be returned."""
+    Is, Xs, Ys = singlefidelitysample
+
+    state = State(ForresterDomain, Is, Xs, Ys)
+
+    surrogate = SingleFidelityGPSurrogate()
+    surrogate.fit(state)
+
+    sampler = Uniform(ForresterDomain.dim)
+
+    # All draws are 1.0, so mask is always False (no candidate has prob > 1)
+    random_draws = np.ones(4)
+    x_sel, y_sel, prob_sel = probabilistic_threshold_sampling_with_exclusion(
+        ForresterDomain, state, sampler, surrogate, 4, 0.5, 3, 0.5, random_draws=random_draws
+    )
+    assert len(x_sel) == 0
