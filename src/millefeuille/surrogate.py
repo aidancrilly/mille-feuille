@@ -52,6 +52,13 @@ class BaseSurrogate(ABC):
         """
         pass
 
+    def print_fit_summary(self):
+        """
+        Print a summary of the fitted model parameters.
+        Subclasses should override this to provide model-specific information.
+        """
+        print("Surrogate fit summary: No details available for this surrogate type.")
+
     def get_XY(self, state: State, output_key: str | None = None):
         """
         Extract training data from the state. Can handle single or multi-output.
@@ -109,9 +116,11 @@ class BaseGPSurrogate(BaseSurrogate, ABC):
         lengthscale_interval=DEFAULT_LENGTHSCALE_INTERVAL,
         noise_interval=DEFAULT_NOISE_INTERVAL,
         outputscale_interval=None,
+        verbose: bool = False,
     ):
         self.model = None
         self.state_dicts = None
+        self.verbose = verbose
 
         self.noise_interval = noise_interval
         self.lengthscale_interval = lengthscale_interval
@@ -233,6 +242,19 @@ class SingleFidelityGPSurrogate(BaseGPSurrogate):
             except RuntimeError as e:
                 print(f"Fitting failed (attempt {attempt + 1}), retrying… {e}")
 
+        if self.verbose:
+            self.print_fit_summary()
+
+    def print_fit_summary(self):
+        """
+        Print noise level and length scales of the fitted GP.
+        """
+        noise = self.model.likelihood.noise.item()
+        lengthscales = self.model.covar_module.base_kernel.lengthscale.detach().cpu().numpy().flatten()
+        print("SingleFidelityGPSurrogate fit summary:")
+        print(f"  Noise level:   {noise:.6e}")
+        print(f"  Length scales: {lengthscales}")
+
     def predict(self, state: State, Xs):
         # Get transformed model inputs on the device
         Xs_unit = state.transform_X(Xs)
@@ -289,6 +311,19 @@ class MultiFidelityGPSurrogate(BaseGPSurrogate):
                 break
             except RuntimeError as e:
                 print(f"Fitting failed (attempt {attempt + 1}), retrying... {e}")
+
+        if self.verbose:
+            self.print_fit_summary()
+
+    def print_fit_summary(self):
+        """
+        Print noise level and length scales of the fitted multi-fidelity GP.
+        """
+        noise = self.model.likelihood.noise.item()
+        lengthscales = self.model.covar_module.base_kernel.lengthscale.detach().cpu().numpy().flatten()
+        print("MultiFidelityGPSurrogate fit summary:")
+        print(f"  Noise level:   {noise:.6e}")
+        print(f"  Length scales: {lengthscales}")
 
     def predict(self, state: State, Xs):
         # Transform inputs -> this duplicates across fidelities
@@ -480,9 +515,11 @@ class BaseEnsemblePyTorchSurrogate(BaseSurrogate, ABC):
         loss: type[nn.Module] | None = None,
         reset_before_training: bool = True,
         variance_calibration: float = 1.0,
+        verbose: bool = False,
     ):
         self.model_base_class = model_base_class
         self.ensemble_size = ensemble_size
+        self.verbose = verbose
 
         if train_test_split is None:
             train_test_split = [0.7, 0.3]
@@ -545,6 +582,25 @@ class SingleFidelityEnsembleSurrogate(BaseEnsemblePyTorchSurrogate):
         X_torch, Y_torch = self.get_XY(state)
 
         self.model.fit(X_torch, Y_torch)
+
+        if self.verbose:
+            with torch.no_grad():
+                post = self.model.posterior(X_torch.unsqueeze(1))
+                mean = post.mean.reshape(-1, 1)
+            Y_flat = Y_torch.reshape(-1, 1)
+            ss_res = ((Y_flat - mean) ** 2).sum().item()
+            ss_tot = ((Y_flat - Y_flat.mean()) ** 2).sum().item()
+            self._fit_mse = ss_res / Y_flat.numel()
+            self._fit_r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else float("nan")
+            self.print_fit_summary()
+
+    def print_fit_summary(self):
+        """
+        Print MSE and R2 of the ensemble on the training data.
+        """
+        print("SingleFidelityEnsembleSurrogate fit summary:")
+        print(f"  MSE: {self._fit_mse:.6e}")
+        print(f"  R2:  {self._fit_r2:.6f}")
 
     def predict(self, state: State, Xs):
         Xs_unit = state.transform_X(Xs)
@@ -620,12 +676,31 @@ class SingleFidelityRandomForestSurrogate(BaseSurrogate):
         ``sklearn.ensemble.RandomForestRegressor``.
     """
 
-    def __init__(self, n_estimators: int = 100, max_depth: int | None = None, **rf_kwargs):
+    def __init__(self, n_estimators: int = 100, max_depth: int | None = None, verbose: bool = False, **rf_kwargs):
         self.model = RandomForestEnsembleModel(n_estimators=n_estimators, max_depth=max_depth, **rf_kwargs)
+        self.verbose = verbose
 
     def fit(self, state: State):
         X_torch, Y_torch = self.get_XY(state)
         self.model.fit(X_torch, Y_torch)
+
+        if self.verbose:
+            X_np = X_torch.cpu().double().numpy()
+            Y_np = Y_torch.cpu().double().numpy().reshape(-1)
+            Y_pred = self.model.rf.predict(X_np)
+            ss_res = float(((Y_np - Y_pred) ** 2).sum())
+            ss_tot = float(((Y_np - Y_np.mean()) ** 2).sum())
+            self._fit_mse = ss_res / len(Y_np)
+            self._fit_r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else float("nan")
+            self.print_fit_summary()
+
+    def print_fit_summary(self):
+        """
+        Print MSE and R2 of the random forest on the training data.
+        """
+        print("SingleFidelityRandomForestSurrogate fit summary:")
+        print(f"  MSE: {self._fit_mse:.6e}")
+        print(f"  R2:  {self._fit_r2:.6f}")
 
     def predict(self, state: State, Xs):
         Xs_unit = state.transform_X(Xs)
