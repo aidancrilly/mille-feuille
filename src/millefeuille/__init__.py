@@ -5,6 +5,7 @@ from .domain import *
 from .initialise import *
 from .kernel import *
 from .optimise import *
+from .scheduler import *
 from .simulator import *
 from .state import *
 from .surrogate import *
