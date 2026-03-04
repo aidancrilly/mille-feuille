@@ -19,6 +19,7 @@ import numpy as np
 import numpy.typing as npt
 
 from .simulator import *
+from .generators import CandidateGenerator
 
 logger = logging.getLogger("millefeuille.scheduler")
 
@@ -284,3 +285,134 @@ class AsyncScheduler:
 
         logger.info("All tasks complete. Total: %d", len(all_results))
         return all_results
+
+def run_async_loop(
+    total_evaluations,
+    generate_candidates,
+    state,
+    simulator,
+    resource_manager,
+    scheduler=None,
+    fidelity_configs=None,
+    refill_interval=None,
+    max_workers=16,
+    poll_interval=0.5,
+    csv_name=None,
+    verbose=False,
+):
+    """Generic asynchronous evaluation loop with a pluggable candidate generator.
+
+    Unlike ``run_async_Bayesian_optimiser`` (which is tied to surrogate-based
+    acquisition), this function accepts **any** callable that produces new
+    candidates.  It is suitable for random sampling, threshold sampling,
+    adaptive strategies, or custom heuristics.
+
+    Parameters:
+        total_evaluations:
+            Total number of simulation evaluations to perform.
+        generate_candidates:
+            A ``CandidateGenerator`` instance or a callable with signature::
+
+                generate_candidates(state, budget) -> (Xs, Ss | None)
+
+            * *state* — current ``State`` (read-only is fine).
+            * *budget* — how many new candidates are requested.
+            * Returns ``Xs`` of shape ``(N, dim)`` and optionally ``Ss``
+              of shape ``(N, 1)`` (or ``None`` for single-fidelity).
+              The function may return fewer than *budget* candidates.
+
+        state:              Current ``State``.
+        simulator:          ``ExectuableSimulator`` or ``PythonSimulator``.
+        resource_manager:   ``ResourceManager`` tracking available cores.
+        scheduler:          ``Scheduler`` instance (required for
+                            ``ExectuableSimulator``).
+        fidelity_configs:   Optional ``{fidelity: FidelityConfig}`` mapping.
+        refill_interval:    Request new candidates every *N* completions
+                            (default: first batch size).
+        max_workers:        Thread-pool size (default 16).
+        poll_interval:      Seconds between scheduling checks (default 0.5).
+        csv_name:           Optional CSV path to persist state.
+        verbose:            Enable info-level log messages.
+
+    Returns:
+        Updated ``State``.
+    """
+
+    def _call_generator(generate_candidates, state, budget):
+        """Invoke a candidate generator, handling both ``CandidateGenerator`` instances and plain callables.
+
+        Returns:
+            (Xs, Ss) where Ss may be ``None``.
+        """
+        if isinstance(generate_candidates, CandidateGenerator):
+            return generate_candidates.generate(state, budget)
+        result = generate_candidates(state, budget)
+        if isinstance(result, tuple) and len(result) == 2:
+            return result
+        return result, None
+    
+    if isinstance(simulator, ExectuableSimulator) and scheduler is None:
+        raise ValueError("If simulator is an ExectuableSimulator, you must provide a scheduler")
+
+    async_sched = AsyncScheduler(
+        simulator=simulator,
+        resource_manager=resource_manager,
+        scheduler=scheduler,
+        fidelity_configs=fidelity_configs,
+        max_workers=max_workers,
+        poll_interval=poll_interval,
+    )
+
+    # --- initial candidates ------------------------------------------------
+    initial_budget = min(total_evaluations, resource_manager.total)
+    X_init, S_init = _call_generator(generate_candidates, state, initial_budget)
+
+    n_init = X_init.shape[0]
+    index_start = int(state.index.max()) + 1
+    idx_init = index_start + np.arange(n_init)
+    initial_tasks = async_sched.create_tasks(idx_init, X_init, S_init)
+
+    if refill_interval is None:
+        refill_interval = n_init
+
+    # --- book-keeping ------------------------------------------------------
+    evaluations_launched = [n_init]
+    completions_since_refill = [0]
+
+    def _on_tasks_complete(state, completed_tasks):
+        completions_since_refill[0] += len(completed_tasks)
+
+        if csv_name is not None:
+            state.to_csv(csv_name)
+
+        remaining = total_evaluations - evaluations_launched[0]
+        if remaining <= 0:
+            return None
+
+        if completions_since_refill[0] >= refill_interval:
+            completions_since_refill[0] = 0
+            budget = min(refill_interval, remaining)
+
+            if verbose:
+                logger.info(
+                    "Generating new candidates (launched=%d/%d)",
+                    evaluations_launched[0],
+                    total_evaluations,
+                )
+
+            X_new, S_new = _call_generator(generate_candidates, state, budget)
+
+            n_new = X_new.shape[0]
+            idx_start = int(state.index.max()) + 1
+            idx_new = idx_start + np.arange(n_new)
+            new_tasks = async_sched.create_tasks(idx_new, X_new, S_new)
+
+            evaluations_launched[0] += n_new
+            return new_tasks
+
+        return None
+
+    # --- run ---------------------------------------------------------------
+    async_sched.run(state, initial_tasks, on_tasks_complete=_on_tasks_complete)
+
+    return state
