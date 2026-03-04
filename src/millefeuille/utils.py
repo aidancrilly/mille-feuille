@@ -4,7 +4,7 @@ import numpy as np
 from scipy.stats import norm
 
 from .optimise import *
-from .scheduler import AsyncScheduler, ResourceManager
+from .asynch import AsyncScheduler, ResourceManager
 from .simulator import *
 from .surrogate import BaseSurrogate
 

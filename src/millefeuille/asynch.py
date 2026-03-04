@@ -12,105 +12,15 @@ Key components:
 """
 
 import logging
-import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
 
 import numpy as np
 import numpy.typing as npt
 
-from .simulator import ExectuableSimulator, PythonSimulator, Scheduler
-
-__all__ = ["FidelityConfig", "Task", "ResourceManager", "AsyncScheduler"]
+from .simulator import *
 
 logger = logging.getLogger("millefeuille.scheduler")
-
-
-# ---------------------------------------------------------------------------
-# Lightweight data classes
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class FidelityConfig:
-    """Configuration for a single discrete fidelity level.
-
-    Attributes:
-        cores_required:   Number of cores needed to run a job at this fidelity.
-        reserve:          If True the scheduler reserves cores so that jobs at
-                          this fidelity are not starved by cheaper work.
-        estimated_runtime: Optional runtime estimate in seconds (informational).
-    """
-
-    cores_required: int
-    reserve: bool = False
-    estimated_runtime: float | None = None
-
-
-@dataclass
-class Task:
-    """A single simulation task.
-
-    Attributes:
-        index:          Unique run index.
-        x:              Input parameter vector (1-D array).
-        s:              Fidelity level (None for single-fidelity problems).
-        cores_required: Number of cores this task will consume.
-        reserve:        Whether this task belongs to a reserved fidelity.
-    """
-
-    index: int
-    x: npt.NDArray
-    s: int | None
-    cores_required: int
-    reserve: bool = False
-
-
-# ---------------------------------------------------------------------------
-# Resource accounting
-# ---------------------------------------------------------------------------
-
-
-class ResourceManager:
-    """Thread-safe tracker for available compute cores."""
-
-    def __init__(self, total_cores: int):
-        self._total = total_cores
-        self._used = 0
-        self._lock = threading.Lock()
-
-    @property
-    def total(self) -> int:
-        return self._total
-
-    @property
-    def used(self) -> int:
-        with self._lock:
-            return self._used
-
-    @property
-    def available(self) -> int:
-        with self._lock:
-            return self._total - self._used
-
-    def allocate(self, cores: int) -> bool:
-        """Try to allocate *cores*.  Returns True on success."""
-        with self._lock:
-            if self._used + cores <= self._total:
-                self._used += cores
-                return True
-            return False
-
-    def release(self, cores: int):
-        """Return *cores* to the pool."""
-        with self._lock:
-            self._used = max(0, self._used - cores)
-
-    def utilisation(self) -> float:
-        """Current utilisation as a fraction in [0, 1]."""
-        with self._lock:
-            return self._used / self._total if self._total > 0 else 0.0
 
 
 # ---------------------------------------------------------------------------
