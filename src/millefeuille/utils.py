@@ -1,11 +1,15 @@
 import logging
 
 import numpy as np
-from scipy.stats import norm
 
+from .asynch import AsyncScheduler
+from .generators import (
+    BayesianOptimisationGenerator,
+    CandidateGenerator,
+    _greedy_exclusion,
+    _probabilistic_threshold_filter,
+)
 from .optimise import *
-from .asynch import AsyncScheduler, ResourceManager
-from .generators import BayesianOptimisationGenerator, CandidateGenerator
 from .simulator import *
 from .surrogate import BaseSurrogate
 
@@ -14,6 +18,20 @@ logger = logging.getLogger("millefeuille.scheduler")
 """
 Defines some useful utility functions which do not fit into the defined classes
 """
+
+
+def _call_generator(generate_candidates, state, budget):
+    """Invoke a candidate generator, handling both ``CandidateGenerator`` instances and plain callables.
+
+    Returns:
+        (Xs, Ss) where Ss may be ``None``.
+    """
+    if isinstance(generate_candidates, CandidateGenerator):
+        return generate_candidates.generate(state, budget)
+    result = generate_candidates(state, budget)
+    if isinstance(result, tuple) and len(result) == 2:
+        return result
+    return result, None
 
 
 def probabilistic_threshold_sampling(
@@ -49,40 +67,17 @@ def probabilistic_threshold_sampling(
         prob: predicted P(y > threshold) for each point
         mask: boolean array of points that passed the stochastic filter
     """
-    # Generate inputs
-    x_unit = sampler.random(initial_samples)
-    x_all = domain.inverse_transform(x_unit)
-
-    # Predict mean and std from GP
-    predictions = surrogate.predict(state, x_all)
-
-    if target_key is not None:
-        prediction = predictions[target_key]
-    else:
-        if target_fidelity is not None:
-            prediction = predictions[target_fidelity]
-        else:
-            if "mean" not in predictions.keys():
-                raise ValueError(
-                    "mean missing from predictions.keys(), did you miss target_fidelity or target_key inputs?"
-                )
-            prediction = predictions
-
-    mean, std = prediction["mean"], prediction["std"]
-
-    # Compute probability P(y > threshold)
-    mean = mean.flatten()
-    std = std.flatten()
-    prob = 1.0 - norm.cdf(threshold_value, loc=mean, scale=std)
-
-    # Generate random draws
-    if random_draws is None:
-        random_draws = np.random.rand(initial_samples)
-
-    mask = prob > random_draws
-    y_pred = mean
-
-    return x_all, y_pred, prob, mask
+    return _probabilistic_threshold_filter(
+        domain=domain,
+        state=state,
+        sampler=sampler,
+        surrogate=surrogate,
+        pool_size=initial_samples,
+        threshold_value=threshold_value,
+        target_fidelity=target_fidelity,
+        target_key=target_key,
+        random_draws=random_draws,
+    )
 
 
 def surrogate_threshold_sampling(
@@ -179,14 +174,13 @@ def probabilistic_threshold_sampling_with_exclusion(
         y_selected: predicted means at selected points (shape: K,)
         prob_selected: predicted P(y > threshold) at selected points (shape: K,)
     """
-    # Step 1: Draw candidates and apply probabilistic threshold filter
-    x_all, y_pred, prob, mask = probabilistic_threshold_sampling(
-        domain,
-        state,
-        sampler,
-        surrogate,
-        initial_samples,
-        threshold_value,
+    x_all, y_pred, prob, mask = _probabilistic_threshold_filter(
+        domain=domain,
+        state=state,
+        sampler=sampler,
+        surrogate=surrogate,
+        pool_size=initial_samples,
+        threshold_value=threshold_value,
         target_fidelity=target_fidelity,
         target_key=target_key,
         random_draws=random_draws,
@@ -199,73 +193,10 @@ def probabilistic_threshold_sampling_with_exclusion(
     if len(x_candidates) == 0:
         return x_candidates, y_candidates, prob_candidates
 
-    n_candidates, n_dims = x_candidates.shape
-
-    # Step 2: Cluster analysis — fall back gracefully if too few points
-    n_clusters_actual = min(n_clusters, n_candidates)
-    if n_clusters_actual > 1:
-        from scipy.cluster.vq import kmeans2
-
-        _, labels = kmeans2(x_candidates, n_clusters_actual, minit="points", seed=0)
-    else:
-        labels = np.zeros(n_candidates, dtype=int)
-        n_clusters_actual = 1
-
-    # Step 3: PCA-normalise within each cluster
-    x_normalised = np.empty_like(x_candidates)
-    for k in range(n_clusters_actual):
-        cluster_mask = labels == k
-        x_cluster = x_candidates[cluster_mask]
-
-        if len(x_cluster) == 0:
-            continue
-
-        mean = x_cluster.mean(axis=0)
-        x_centered = x_cluster - mean
-
-        if len(x_cluster) == 1 or n_dims == 1:
-            # Scalar normalisation along each dimension
-            std = x_centered.std(axis=0)
-            std = np.where(std > 0, std, 1.0)
-            x_normalised[cluster_mask] = x_centered / std
-        else:
-            cov = np.cov(x_centered.T)
-            eigenvalues, eigenvectors = np.linalg.eigh(cov)
-            eigenvalues = np.maximum(eigenvalues, 1e-10)
-            x_normalised[cluster_mask] = x_centered @ eigenvectors / np.sqrt(eigenvalues)
-
-    # Step 4: Greedy selection with rejection based on distance in normalised space.
-    # Exclusion is applied within each cluster independently, since the PCA
-    # normalised coordinates have different origins and scales per cluster.
-    # Prioritise highest-probability candidates.
-    sort_idx = np.argsort(-prob_candidates)
-
-    selected_indices = []
-    # Map cluster label -> list of already-selected normalised coordinates in that cluster
-    selected_normalised_per_cluster = {k: [] for k in range(n_clusters_actual)}
-
-    for idx in sort_idx:
-        if len(selected_indices) >= batch_size:
-            break
-
-        cluster_k = labels[idx]
-        x_norm_i = x_normalised[idx]
-        already_selected = selected_normalised_per_cluster[cluster_k]
-
-        if len(already_selected) == 0:
-            selected_indices.append(idx)
-            already_selected.append(x_norm_i)
-        else:
-            dists = np.linalg.norm(np.array(already_selected) - x_norm_i, axis=1)
-            if np.all(dists >= rejection_radius):
-                selected_indices.append(idx)
-                already_selected.append(x_norm_i)
-
-    if len(selected_indices) == 0:
-        return np.empty((0, n_dims)), np.empty(0), np.empty(0)
-
-    selected_indices = np.array(selected_indices)
-    return x_candidates[selected_indices], y_candidates[selected_indices], prob_candidates[selected_indices]
+    return _greedy_exclusion(
+        x_candidates, y_candidates, prob_candidates,
+        batch_size, rejection_radius, n_clusters,
+    )
 
 
 def run_Bayesian_optimiser(
@@ -285,19 +216,18 @@ def run_Bayesian_optimiser(
         raise Exception
     assert isinstance(surrogate, BaseSurrogate)
 
+    generator = BayesianOptimisationGenerator(
+        domain=state.input_domain,
+        surrogate=surrogate,
+        generate_acq_fn=generate_acq_function,
+        refit_surrogate=True,
+        verbose=verbose,
+        **kwargs,
+    )
+
     for _ in range(Nsamples):
-        surrogate.fit(state)
-        acq_function = generate_acq_function(surrogate, state)
+        index_next, X_next, S_next = generator(state, batch_size)
 
-        if state.l_MultiFidelity:
-            X_next, S_next = suggest_next_locations(
-                batch_size, state, acq_function=acq_function, verbose=verbose, **kwargs
-            )
-        else:
-            X_next = suggest_next_locations(batch_size, state, acq_function=acq_function, verbose=verbose, **kwargs)
-            S_next = None
-
-        index_next = state.index[-1] + np.arange(batch_size) + 1
         if isinstance(simulator, ExectuableSimulator):
             P_next, Y_next = simulator(index_next, X_next, scheduler, Ss=S_next)
         elif isinstance(simulator, PythonSimulator):
@@ -336,9 +266,6 @@ def run_async_Bayesian_optimiser(
     available, and the surrogate is retrained after every
     *retrain_interval* completions.
 
-    Internally delegates to ``run_async_loop`` with a
-    ``BayesianOptimisationGenerator``.
-
     Parameters:
         total_evaluations:  Total number of simulation evaluations.
         batch_size:         Candidates generated per surrogate retraining.
@@ -365,6 +292,9 @@ def run_async_Bayesian_optimiser(
         raise ValueError("If simulator is an ExectuableSimulator, you must provide a scheduler")
     assert isinstance(surrogate, BaseSurrogate)
 
+    if retrain_interval is None:
+        retrain_interval = batch_size
+
     generator = BayesianOptimisationGenerator(
         domain=state.input_domain,
         surrogate=surrogate,
@@ -382,8 +312,7 @@ def run_async_Bayesian_optimiser(
         resource_manager=resource_manager,
         scheduler=scheduler,
         fidelity_configs=fidelity_configs,
-        refill_interval=retrain_interval or batch_size,
-        batch_size=batch_size,
+        refill_interval=retrain_interval,
         max_workers=max_workers,
         poll_interval=poll_interval,
         csv_name=csv_name,
@@ -400,7 +329,6 @@ def run_async_loop(
     scheduler=None,
     fidelity_configs=None,
     refill_interval=None,
-    batch_size=None,
     max_workers=16,
     poll_interval=0.5,
     csv_name=None,
@@ -408,16 +336,25 @@ def run_async_loop(
 ):
     """Generic asynchronous evaluation loop with a pluggable candidate generator.
 
-    Accepts **any** ``CandidateGenerator`` instance (recommended) or a plain
-    callable ``(state, budget) -> (Xs, Ss | None)``.
+    Unlike ``run_async_Bayesian_optimiser`` (which is tied to surrogate-based
+    acquisition), this function accepts **any** callable that produces new
+    candidates.  It is suitable for random sampling, threshold sampling,
+    adaptive strategies, or custom heuristics.
 
     Parameters:
         total_evaluations:
             Total number of simulation evaluations to perform.
         generate_candidates:
-            Either a ``CandidateGenerator`` instance whose ``__call__``
-            returns ``(indices, Xs, Ss)`` or a plain callable with
-            signature ``(state, budget) -> (Xs, Ss | None)``.
+            A ``CandidateGenerator`` instance or a callable with signature::
+
+                generate_candidates(state, budget) -> (Xs, Ss | None)
+
+            * *state* — current ``State`` (read-only is fine).
+            * *budget* — how many new candidates are requested.
+            * Returns ``Xs`` of shape ``(N, dim)`` and optionally ``Ss``
+              of shape ``(N, 1)`` (or ``None`` for single-fidelity).
+              The function may return fewer than *budget* candidates.
+
         state:              Current ``State``.
         simulator:          ``ExectuableSimulator`` or ``PythonSimulator``.
         resource_manager:   ``ResourceManager`` tracking available cores.
@@ -425,9 +362,7 @@ def run_async_loop(
                             ``ExectuableSimulator``).
         fidelity_configs:   Optional ``{fidelity: FidelityConfig}`` mapping.
         refill_interval:    Request new candidates every *N* completions
-                            (default: *batch_size* or first batch size).
-        batch_size:         Number of candidates per generation call.
-                            Defaults to *refill_interval* or total cores.
+                            (default: first batch size).
         max_workers:        Thread-pool size (default 16).
         poll_interval:      Seconds between scheduling checks (default 0.5).
         csv_name:           Optional CSV path to persist state.
@@ -439,8 +374,6 @@ def run_async_loop(
     if isinstance(simulator, ExectuableSimulator) and scheduler is None:
         raise ValueError("If simulator is an ExectuableSimulator, you must provide a scheduler")
 
-    is_generator_cls = isinstance(generate_candidates, CandidateGenerator)
-
     async_sched = AsyncScheduler(
         simulator=simulator,
         resource_manager=resource_manager,
@@ -451,29 +384,16 @@ def run_async_loop(
     )
 
     # --- initial candidates ------------------------------------------------
-    initial_budget = batch_size or min(total_evaluations, resource_manager.total)
-    initial_budget = min(initial_budget, total_evaluations)
-
-    if is_generator_cls:
-        idx_init, X_init, S_init = generate_candidates(state, initial_budget)
-    else:
-        result = generate_candidates(state, initial_budget)
-        if isinstance(result, tuple) and len(result) == 3:
-            idx_init, X_init, S_init = result
-        elif isinstance(result, tuple) and len(result) == 2:
-            X_init, S_init = result
-            index_start = int(state.index.max()) + 1
-            idx_init = index_start + np.arange(X_init.shape[0])
-        else:
-            X_init, S_init = result, None
-            index_start = int(state.index.max()) + 1
-            idx_init = index_start + np.arange(X_init.shape[0])
+    initial_budget = min(total_evaluations, resource_manager.total)
+    X_init, S_init = _call_generator(generate_candidates, state, initial_budget)
 
     n_init = X_init.shape[0]
+    index_start = int(state.index.max()) + 1
+    idx_init = index_start + np.arange(n_init)
     initial_tasks = async_sched.create_tasks(idx_init, X_init, S_init)
 
     if refill_interval is None:
-        refill_interval = batch_size or n_init
+        refill_interval = n_init
 
     # --- book-keeping ------------------------------------------------------
     evaluations_launched = [n_init]
@@ -491,7 +411,7 @@ def run_async_loop(
 
         if completions_since_refill[0] >= refill_interval:
             completions_since_refill[0] = 0
-            budget = min(batch_size or refill_interval, remaining)
+            budget = min(refill_interval, remaining)
 
             if verbose:
                 logger.info(
@@ -500,22 +420,11 @@ def run_async_loop(
                     total_evaluations,
                 )
 
-            if is_generator_cls:
-                idx_new, X_new, S_new = generate_candidates(state, budget)
-            else:
-                result = generate_candidates(state, budget)
-                if isinstance(result, tuple) and len(result) == 3:
-                    idx_new, X_new, S_new = result
-                elif isinstance(result, tuple) and len(result) == 2:
-                    X_new, S_new = result
-                    idx_start = int(state.index.max()) + 1
-                    idx_new = idx_start + np.arange(X_new.shape[0])
-                else:
-                    X_new, S_new = result, None
-                    idx_start = int(state.index.max()) + 1
-                    idx_new = idx_start + np.arange(X_new.shape[0])
+            X_new, S_new = _call_generator(generate_candidates, state, budget)
 
             n_new = X_new.shape[0]
+            idx_start = int(state.index.max()) + 1
+            idx_new = idx_start + np.arange(n_new)
             new_tasks = async_sched.create_tasks(idx_new, X_new, S_new)
 
             evaluations_launched[0] += n_new

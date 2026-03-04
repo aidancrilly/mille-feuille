@@ -412,6 +412,7 @@ def _probabilistic_threshold_filter(
     threshold_value,
     target_fidelity=None,
     target_key=None,
+    random_draws=None,
 ):
     """Draw random candidates and compute probabilistic threshold mask.
 
@@ -438,7 +439,8 @@ def _probabilistic_threshold_filter(
     std = prediction["std"].flatten()
     prob = 1.0 - norm.cdf(threshold_value, loc=mean, scale=std)
 
-    random_draws = np.random.rand(pool_size)
+    if random_draws is None:
+        random_draws = np.random.rand(pool_size)
     mask = prob > random_draws
 
     return x_all, mean, prob, mask
