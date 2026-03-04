@@ -5,6 +5,7 @@ from scipy.stats import norm
 
 from .optimise import *
 from .asynch import AsyncScheduler, ResourceManager
+from .generators import BayesianOptimisationGenerator, CandidateGenerator
 from .simulator import *
 from .surrogate import BaseSurrogate
 
@@ -335,6 +336,9 @@ def run_async_Bayesian_optimiser(
     available, and the surrogate is retrained after every
     *retrain_interval* completions.
 
+    Internally delegates to ``run_async_loop`` with a
+    ``BayesianOptimisationGenerator``.
+
     Parameters:
         total_evaluations:  Total number of simulation evaluations.
         batch_size:         Candidates generated per surrogate retraining.
@@ -361,89 +365,30 @@ def run_async_Bayesian_optimiser(
         raise ValueError("If simulator is an ExectuableSimulator, you must provide a scheduler")
     assert isinstance(surrogate, BaseSurrogate)
 
-    if retrain_interval is None:
-        retrain_interval = batch_size
+    generator = BayesianOptimisationGenerator(
+        domain=state.input_domain,
+        surrogate=surrogate,
+        generate_acq_fn=generate_acq_function,
+        refit_surrogate=True,
+        verbose=verbose,
+        **kwargs,
+    )
 
-    async_sched = AsyncScheduler(
+    return run_async_loop(
+        total_evaluations=total_evaluations,
+        generate_candidates=generator,
+        state=state,
         simulator=simulator,
         resource_manager=resource_manager,
         scheduler=scheduler,
         fidelity_configs=fidelity_configs,
+        refill_interval=retrain_interval or batch_size,
+        batch_size=batch_size,
         max_workers=max_workers,
         poll_interval=poll_interval,
+        csv_name=csv_name,
+        verbose=verbose,
     )
-
-    # --- initial candidates ------------------------------------------------
-    surrogate.fit(state)
-    acq_function = generate_acq_function(surrogate, state)
-    initial_count = min(batch_size, total_evaluations)
-
-    if state.l_MultiFidelity:
-        X_next, S_next = suggest_next_locations(
-            initial_count, state, acq_function, verbose=verbose, **kwargs
-        )
-    else:
-        X_next = suggest_next_locations(
-            initial_count, state, acq_function, verbose=verbose, **kwargs
-        )
-        S_next = None
-
-    index_start = int(state.index.max()) + 1
-    index_next = index_start + np.arange(initial_count)
-    initial_tasks = async_sched.create_tasks(index_next, X_next, S_next)
-
-    # --- book-keeping (mutable containers for closure) ---------------------
-    evaluations_launched = [initial_count]
-    completions_since_retrain = [0]
-
-    def _on_tasks_complete(state, completed_tasks):
-        """Called in the main thread after each batch of completions."""
-        completions_since_retrain[0] += len(completed_tasks)
-
-        if csv_name is not None:
-            state.to_csv(csv_name)
-
-        remaining = total_evaluations - evaluations_launched[0]
-        if remaining <= 0:
-            return None
-
-        if completions_since_retrain[0] >= retrain_interval:
-            completions_since_retrain[0] = 0
-            count = min(batch_size, remaining)
-
-            if verbose:
-                logger.info(
-                    "Retraining surrogate (launched=%d/%d)",
-                    evaluations_launched[0],
-                    total_evaluations,
-                )
-
-            surrogate.fit(state)
-            acq_fn = generate_acq_function(surrogate, state)
-
-            if state.l_MultiFidelity:
-                X_new, S_new = suggest_next_locations(
-                    count, state, acq_fn, verbose=verbose, **kwargs
-                )
-            else:
-                X_new = suggest_next_locations(
-                    count, state, acq_fn, verbose=verbose, **kwargs
-                )
-                S_new = None
-
-            idx_start = int(state.index.max()) + 1
-            idx_new = idx_start + np.arange(count)
-            new_tasks = async_sched.create_tasks(idx_new, X_new, S_new)
-
-            evaluations_launched[0] += count
-            return new_tasks
-
-        return None
-
-    # --- run ---------------------------------------------------------------
-    async_sched.run(state, initial_tasks, on_tasks_complete=_on_tasks_complete)
-
-    return state
 
 
 def run_async_loop(
@@ -455,6 +400,7 @@ def run_async_loop(
     scheduler=None,
     fidelity_configs=None,
     refill_interval=None,
+    batch_size=None,
     max_workers=16,
     poll_interval=0.5,
     csv_name=None,
@@ -462,25 +408,16 @@ def run_async_loop(
 ):
     """Generic asynchronous evaluation loop with a pluggable candidate generator.
 
-    Unlike ``run_async_Bayesian_optimiser`` (which is tied to surrogate-based
-    acquisition), this function accepts **any** callable that produces new
-    candidates.  It is suitable for random sampling, threshold sampling,
-    adaptive strategies, or custom heuristics.
+    Accepts **any** ``CandidateGenerator`` instance (recommended) or a plain
+    callable ``(state, budget) -> (Xs, Ss | None)``.
 
     Parameters:
         total_evaluations:
             Total number of simulation evaluations to perform.
         generate_candidates:
-            A callable with signature::
-
-                generate_candidates(state, budget) -> (Xs, Ss | None)
-
-            * *state* — current ``State`` (read-only is fine).
-            * *budget* — how many new candidates are requested.
-            * Returns ``Xs`` of shape ``(N, dim)`` and optionally ``Ss``
-              of shape ``(N, 1)`` (or ``None`` for single-fidelity).
-              The function may return fewer than *budget* candidates.
-
+            Either a ``CandidateGenerator`` instance whose ``__call__``
+            returns ``(indices, Xs, Ss)`` or a plain callable with
+            signature ``(state, budget) -> (Xs, Ss | None)``.
         state:              Current ``State``.
         simulator:          ``ExectuableSimulator`` or ``PythonSimulator``.
         resource_manager:   ``ResourceManager`` tracking available cores.
@@ -488,7 +425,9 @@ def run_async_loop(
                             ``ExectuableSimulator``).
         fidelity_configs:   Optional ``{fidelity: FidelityConfig}`` mapping.
         refill_interval:    Request new candidates every *N* completions
-                            (default: first batch size).
+                            (default: *batch_size* or first batch size).
+        batch_size:         Number of candidates per generation call.
+                            Defaults to *refill_interval* or total cores.
         max_workers:        Thread-pool size (default 16).
         poll_interval:      Seconds between scheduling checks (default 0.5).
         csv_name:           Optional CSV path to persist state.
@@ -500,6 +439,8 @@ def run_async_loop(
     if isinstance(simulator, ExectuableSimulator) and scheduler is None:
         raise ValueError("If simulator is an ExectuableSimulator, you must provide a scheduler")
 
+    is_generator_cls = isinstance(generate_candidates, CandidateGenerator)
+
     async_sched = AsyncScheduler(
         simulator=simulator,
         resource_manager=resource_manager,
@@ -510,20 +451,29 @@ def run_async_loop(
     )
 
     # --- initial candidates ------------------------------------------------
-    initial_budget = min(total_evaluations, resource_manager.total)
-    result = generate_candidates(state, initial_budget)
-    if isinstance(result, tuple) and len(result) == 2:
-        X_init, S_init = result
+    initial_budget = batch_size or min(total_evaluations, resource_manager.total)
+    initial_budget = min(initial_budget, total_evaluations)
+
+    if is_generator_cls:
+        idx_init, X_init, S_init = generate_candidates(state, initial_budget)
     else:
-        X_init, S_init = result, None
+        result = generate_candidates(state, initial_budget)
+        if isinstance(result, tuple) and len(result) == 3:
+            idx_init, X_init, S_init = result
+        elif isinstance(result, tuple) and len(result) == 2:
+            X_init, S_init = result
+            index_start = int(state.index.max()) + 1
+            idx_init = index_start + np.arange(X_init.shape[0])
+        else:
+            X_init, S_init = result, None
+            index_start = int(state.index.max()) + 1
+            idx_init = index_start + np.arange(X_init.shape[0])
 
     n_init = X_init.shape[0]
-    index_start = int(state.index.max()) + 1
-    idx_init = index_start + np.arange(n_init)
     initial_tasks = async_sched.create_tasks(idx_init, X_init, S_init)
 
     if refill_interval is None:
-        refill_interval = n_init
+        refill_interval = batch_size or n_init
 
     # --- book-keeping ------------------------------------------------------
     evaluations_launched = [n_init]
@@ -541,7 +491,7 @@ def run_async_loop(
 
         if completions_since_refill[0] >= refill_interval:
             completions_since_refill[0] = 0
-            budget = min(refill_interval, remaining)
+            budget = min(batch_size or refill_interval, remaining)
 
             if verbose:
                 logger.info(
@@ -550,15 +500,22 @@ def run_async_loop(
                     total_evaluations,
                 )
 
-            result = generate_candidates(state, budget)
-            if isinstance(result, tuple) and len(result) == 2:
-                X_new, S_new = result
+            if is_generator_cls:
+                idx_new, X_new, S_new = generate_candidates(state, budget)
             else:
-                X_new, S_new = result, None
+                result = generate_candidates(state, budget)
+                if isinstance(result, tuple) and len(result) == 3:
+                    idx_new, X_new, S_new = result
+                elif isinstance(result, tuple) and len(result) == 2:
+                    X_new, S_new = result
+                    idx_start = int(state.index.max()) + 1
+                    idx_new = idx_start + np.arange(X_new.shape[0])
+                else:
+                    X_new, S_new = result, None
+                    idx_start = int(state.index.max()) + 1
+                    idx_new = idx_start + np.arange(X_new.shape[0])
 
             n_new = X_new.shape[0]
-            idx_start = int(state.index.max()) + 1
-            idx_new = idx_start + np.arange(n_new)
             new_tasks = async_sched.create_tasks(idx_new, X_new, S_new)
 
             evaluations_launched[0] += n_new
