@@ -25,14 +25,6 @@ from .optimise import suggest_next_locations
 from .state import State
 from .surrogate import BaseSurrogate
 
-__all__ = [
-    "CandidateGenerator",
-    "RandomCandidateGenerator",
-    "BayesianOptimisationGenerator",
-    "ThresholdCandidateGenerator",
-    "ThresholdExclusionGenerator",
-]
-
 
 # ---------------------------------------------------------------------------
 # Abstract base class

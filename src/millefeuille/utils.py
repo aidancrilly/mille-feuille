@@ -1,8 +1,3 @@
-import logging
-
-import numpy as np
-
-from .asynch import AsyncScheduler
 from .generators import (
     BayesianOptimisationGenerator,
     CandidateGenerator,
@@ -13,26 +8,10 @@ from .optimise import *
 from .simulator import *
 from .surrogate import BaseSurrogate
 
-logger = logging.getLogger("millefeuille.scheduler")
 
 """
 Defines some useful utility functions which do not fit into the defined classes
 """
-
-
-def _call_generator(generate_candidates, state, budget):
-    """Invoke a candidate generator, handling both ``CandidateGenerator`` instances and plain callables.
-
-    Returns:
-        (Xs, Ss) where Ss may be ``None``.
-    """
-    if isinstance(generate_candidates, CandidateGenerator):
-        return generate_candidates.generate(state, budget)
-    result = generate_candidates(state, budget)
-    if isinstance(result, tuple) and len(result) == 2:
-        return result
-    return result, None
-
 
 def probabilistic_threshold_sampling(
     domain,
@@ -225,8 +204,64 @@ def run_Bayesian_optimiser(
         **kwargs,
     )
 
+    return run_generator_loop(
+        Nsamples=Nsamples,
+        batch_size=batch_size,
+        generate_candidates=generator,
+        state=state,
+        simulator=simulator,
+        scheduler=scheduler,
+        csv_name=csv_name,
+    )
+
+
+def run_generator_loop(
+    Nsamples,
+    batch_size,
+    generate_candidates,
+    state,
+    simulator,
+    scheduler=None,
+    csv_name=None,
+):
+    """Synchronous generate-evaluate loop with a pluggable candidate generator.
+
+    Generalises ``run_Bayesian_optimiser`` to accept any ``CandidateGenerator``
+    instance or plain callable.  Each iteration generates *batch_size*
+    candidates, evaluates them with the simulator, and updates the state.
+
+    Parameters:
+        Nsamples:           Number of generate-evaluate iterations.
+        batch_size:         Candidates requested per iteration.
+        generate_candidates:
+            A ``CandidateGenerator`` instance or a callable with signature::
+
+                generate_candidates(state, n) -> (indices, Xs, Ss | None)
+
+            * *state* — current ``State``.
+            * *n* — how many candidates are requested.
+            * Returns ``indices`` (1-D int array), ``Xs`` (N × dim),
+              and ``Ss`` (N × 1 or ``None``).
+
+            If a ``CandidateGenerator`` is passed its ``__call__`` method
+            is used directly.  A plain callable must return the same
+            3-tuple.
+        state:              Current ``State``.
+        simulator:          ``ExectuableSimulator`` or ``PythonSimulator``.
+        scheduler:          ``Scheduler`` instance (required for
+                            ``ExectuableSimulator``).
+        csv_name:           Optional CSV path to persist state after each
+                            iteration.
+
+    Returns:
+        Updated ``State``.
+    """
+    if isinstance(simulator, ExectuableSimulator) and scheduler is None:
+        print("If simulator is an ExecutableSimulator, you must provide a scheduler")
+        raise Exception
+
     for _ in range(Nsamples):
-        index_next, X_next, S_next = generator(state, batch_size)
+        index_next, X_next, S_next = generate_candidates(state, batch_size)
 
         if isinstance(simulator, ExectuableSimulator):
             P_next, Y_next = simulator(index_next, X_next, scheduler, Ss=S_next)
@@ -238,201 +273,5 @@ def run_Bayesian_optimiser(
         state.update(index_next, X_next=X_next, Y_next=Y_next, P_next=P_next, S_next=S_next)
         if csv_name is not None:
             state.to_csv(csv_name)
-
-    return state
-
-
-def run_async_Bayesian_optimiser(
-    total_evaluations,
-    batch_size,
-    generate_acq_function,
-    state,
-    surrogate,
-    simulator,
-    resource_manager,
-    scheduler=None,
-    fidelity_configs=None,
-    retrain_interval=None,
-    max_workers=16,
-    poll_interval=0.5,
-    csv_name=None,
-    verbose=False,
-    **kwargs,
-):
-    """Asynchronous Bayesian optimisation loop.
-
-    Replaces the synchronous *batch -> wait -> retrain* cycle with
-    continuous scheduling: jobs are launched as soon as cores become
-    available, and the surrogate is retrained after every
-    *retrain_interval* completions.
-
-    Parameters:
-        total_evaluations:  Total number of simulation evaluations.
-        batch_size:         Candidates generated per surrogate retraining.
-        generate_acq_function: ``(surrogate, state) -> acquisition_function``.
-        state:              Current ``State``.
-        surrogate:          Surrogate model instance.
-        simulator:          ``ExectuableSimulator`` or ``PythonSimulator``.
-        resource_manager:   ``ResourceManager`` tracking available cores.
-        scheduler:          ``Scheduler`` instance (required for
-                            ``ExectuableSimulator``).
-        fidelity_configs:   Optional ``{fidelity: FidelityConfig}`` mapping.
-        retrain_interval:   Retrain surrogate every *N* completions
-                            (default: *batch_size*).
-        max_workers:        Thread-pool size (default 16).
-        poll_interval:      Seconds between scheduling checks (default 0.5).
-        csv_name:           Optional CSV path to persist state.
-        verbose:            Enable info-level log messages.
-        **kwargs:           Forwarded to ``suggest_next_locations``.
-
-    Returns:
-        Updated ``State``.
-    """
-    if isinstance(simulator, ExectuableSimulator) and scheduler is None:
-        raise ValueError("If simulator is an ExectuableSimulator, you must provide a scheduler")
-    assert isinstance(surrogate, BaseSurrogate)
-
-    if retrain_interval is None:
-        retrain_interval = batch_size
-
-    generator = BayesianOptimisationGenerator(
-        domain=state.input_domain,
-        surrogate=surrogate,
-        generate_acq_fn=generate_acq_function,
-        refit_surrogate=True,
-        verbose=verbose,
-        **kwargs,
-    )
-
-    return run_async_loop(
-        total_evaluations=total_evaluations,
-        generate_candidates=generator,
-        state=state,
-        simulator=simulator,
-        resource_manager=resource_manager,
-        scheduler=scheduler,
-        fidelity_configs=fidelity_configs,
-        refill_interval=retrain_interval,
-        max_workers=max_workers,
-        poll_interval=poll_interval,
-        csv_name=csv_name,
-        verbose=verbose,
-    )
-
-
-def run_async_loop(
-    total_evaluations,
-    generate_candidates,
-    state,
-    simulator,
-    resource_manager,
-    scheduler=None,
-    fidelity_configs=None,
-    refill_interval=None,
-    max_workers=16,
-    poll_interval=0.5,
-    csv_name=None,
-    verbose=False,
-):
-    """Generic asynchronous evaluation loop with a pluggable candidate generator.
-
-    Unlike ``run_async_Bayesian_optimiser`` (which is tied to surrogate-based
-    acquisition), this function accepts **any** callable that produces new
-    candidates.  It is suitable for random sampling, threshold sampling,
-    adaptive strategies, or custom heuristics.
-
-    Parameters:
-        total_evaluations:
-            Total number of simulation evaluations to perform.
-        generate_candidates:
-            A ``CandidateGenerator`` instance or a callable with signature::
-
-                generate_candidates(state, budget) -> (Xs, Ss | None)
-
-            * *state* — current ``State`` (read-only is fine).
-            * *budget* — how many new candidates are requested.
-            * Returns ``Xs`` of shape ``(N, dim)`` and optionally ``Ss``
-              of shape ``(N, 1)`` (or ``None`` for single-fidelity).
-              The function may return fewer than *budget* candidates.
-
-        state:              Current ``State``.
-        simulator:          ``ExectuableSimulator`` or ``PythonSimulator``.
-        resource_manager:   ``ResourceManager`` tracking available cores.
-        scheduler:          ``Scheduler`` instance (required for
-                            ``ExectuableSimulator``).
-        fidelity_configs:   Optional ``{fidelity: FidelityConfig}`` mapping.
-        refill_interval:    Request new candidates every *N* completions
-                            (default: first batch size).
-        max_workers:        Thread-pool size (default 16).
-        poll_interval:      Seconds between scheduling checks (default 0.5).
-        csv_name:           Optional CSV path to persist state.
-        verbose:            Enable info-level log messages.
-
-    Returns:
-        Updated ``State``.
-    """
-    if isinstance(simulator, ExectuableSimulator) and scheduler is None:
-        raise ValueError("If simulator is an ExectuableSimulator, you must provide a scheduler")
-
-    async_sched = AsyncScheduler(
-        simulator=simulator,
-        resource_manager=resource_manager,
-        scheduler=scheduler,
-        fidelity_configs=fidelity_configs,
-        max_workers=max_workers,
-        poll_interval=poll_interval,
-    )
-
-    # --- initial candidates ------------------------------------------------
-    initial_budget = min(total_evaluations, resource_manager.total)
-    X_init, S_init = _call_generator(generate_candidates, state, initial_budget)
-
-    n_init = X_init.shape[0]
-    index_start = int(state.index.max()) + 1
-    idx_init = index_start + np.arange(n_init)
-    initial_tasks = async_sched.create_tasks(idx_init, X_init, S_init)
-
-    if refill_interval is None:
-        refill_interval = n_init
-
-    # --- book-keeping ------------------------------------------------------
-    evaluations_launched = [n_init]
-    completions_since_refill = [0]
-
-    def _on_tasks_complete(state, completed_tasks):
-        completions_since_refill[0] += len(completed_tasks)
-
-        if csv_name is not None:
-            state.to_csv(csv_name)
-
-        remaining = total_evaluations - evaluations_launched[0]
-        if remaining <= 0:
-            return None
-
-        if completions_since_refill[0] >= refill_interval:
-            completions_since_refill[0] = 0
-            budget = min(refill_interval, remaining)
-
-            if verbose:
-                logger.info(
-                    "Generating new candidates (launched=%d/%d)",
-                    evaluations_launched[0],
-                    total_evaluations,
-                )
-
-            X_new, S_new = _call_generator(generate_candidates, state, budget)
-
-            n_new = X_new.shape[0]
-            idx_start = int(state.index.max()) + 1
-            idx_new = idx_start + np.arange(n_new)
-            new_tasks = async_sched.create_tasks(idx_new, X_new, S_new)
-
-            evaluations_launched[0] += n_new
-            return new_tasks
-
-        return None
-
-    # --- run ---------------------------------------------------------------
-    async_sched.run(state, initial_tasks, on_tasks_complete=_on_tasks_complete)
 
     return state
