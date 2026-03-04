@@ -1,6 +1,5 @@
 from .generators import (
     BayesianOptimisationGenerator,
-    CandidateGenerator,
     _greedy_exclusion,
     _probabilistic_threshold_filter,
 )
@@ -8,10 +7,10 @@ from .optimise import *
 from .simulator import *
 from .surrogate import BaseSurrogate
 
-
 """
 Defines some useful utility functions which do not fit into the defined classes
 """
+
 
 def probabilistic_threshold_sampling(
     domain,
@@ -173,8 +172,12 @@ def probabilistic_threshold_sampling_with_exclusion(
         return x_candidates, y_candidates, prob_candidates
 
     return _greedy_exclusion(
-        x_candidates, y_candidates, prob_candidates,
-        batch_size, rejection_radius, n_clusters,
+        x_candidates,
+        y_candidates,
+        prob_candidates,
+        batch_size,
+        rejection_radius,
+        n_clusters,
     )
 
 
@@ -240,8 +243,8 @@ def run_generator_loop(
 
             * *state* — current ``State``.
             * *n* — how many candidates are requested.
-            * Returns ``indices`` (1-D int array), ``Xs`` (N × dim),
-              and ``Ss`` (N × 1 or ``None``).
+            * Returns ``indices`` (1-D int array), ``Xs`` (N x dim),
+              and ``Ss`` (N x 1 or ``None``).
 
             If a ``CandidateGenerator`` is passed its ``__call__`` method
             is used directly.  A plain callable must return the same

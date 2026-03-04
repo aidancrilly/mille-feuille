@@ -1,12 +1,10 @@
-from abc import ABC, abstractmethod
-from typing import Sequence
-
 import threading
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Sequence
 
 import numpy as np
 import numpy.typing as npt
-
 
 """
 Defines a wrapper over your simulator which is ran on HPC resources
@@ -113,10 +111,10 @@ class ExectuableSimulator(ABC):
         return Ps, Ys
 
 
-
 # ---------------------------------------------------------------------------
 # Resource accounting
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class FidelityConfig:
@@ -151,6 +149,7 @@ class Task:
     s: int | None
     cores_required: int
     reserve: bool = False
+
 
 class ResourceManager:
     """Thread-safe tracker for available compute cores."""

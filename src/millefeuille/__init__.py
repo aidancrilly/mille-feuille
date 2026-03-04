@@ -1,4 +1,5 @@
 from .acquisition import *
+from .asynch import *
 from .cost import *
 from .definitions import *
 from .domain import *
@@ -6,7 +7,6 @@ from .generators import *
 from .initialise import *
 from .kernel import *
 from .optimise import *
-from .asynch import *
 from .simulator import *
 from .state import *
 from .surrogate import *

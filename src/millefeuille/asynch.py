@@ -18,8 +18,8 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import numpy.typing as npt
 
-from .simulator import *
 from .generators import CandidateGenerator
+from .simulator import *
 
 logger = logging.getLogger("millefeuille.scheduler")
 
@@ -286,6 +286,7 @@ class AsyncScheduler:
         logger.info("All tasks complete. Total: %d", len(all_results))
         return all_results
 
+
 def run_async_loop(
     total_evaluations,
     generate_candidates,
@@ -350,7 +351,7 @@ def run_async_loop(
         if isinstance(result, tuple) and len(result) == 2:
             return result
         return result, None
-    
+
     if isinstance(simulator, ExectuableSimulator) and scheduler is None:
         raise ValueError("If simulator is an ExectuableSimulator, you must provide a scheduler")
 

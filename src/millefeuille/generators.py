@@ -7,11 +7,11 @@ based on the current ``State``.  Each generator's ``__call__`` returns
 a synchronous evaluation loop.
 
 Key classes:
-    CandidateGenerator                – abstract base class
-    RandomCandidateGenerator          – uniform random sampling
-    BayesianOptimisationGenerator     – surrogate + acquisition function
-    ThresholdCandidateGenerator       – probabilistic threshold sampling
-    ThresholdExclusionGenerator       – threshold + proximity exclusion
+    CandidateGenerator                = abstract base class
+    RandomCandidateGenerator          = uniform random sampling
+    BayesianOptimisationGenerator     = surrogate + acquisition function
+    ThresholdCandidateGenerator       = probabilistic threshold sampling
+    ThresholdExclusionGenerator       = threshold + proximity exclusion
 """
 
 from abc import ABC, abstractmethod
@@ -24,7 +24,6 @@ from .domain import InputDomain
 from .optimise import suggest_next_locations
 from .state import State
 from .surrogate import BaseSurrogate
-
 
 # ---------------------------------------------------------------------------
 # Abstract base class
@@ -268,9 +267,7 @@ class ThresholdCandidateGenerator(CandidateGenerator):
         x_pass = x_all[mask]
         if len(x_pass) == 0:
             # Fallback: uniform random
-            x_pass = self.domain.inverse_transform(
-                self._rng.uniform(size=(n_candidates, self.domain.dim))
-            )
+            x_pass = self.domain.inverse_transform(self._rng.uniform(size=(n_candidates, self.domain.dim)))
         elif len(x_pass) > n_candidates:
             idx = self._rng.choice(len(x_pass), size=n_candidates, replace=False)
             x_pass = x_pass[idx]
@@ -360,22 +357,22 @@ class ThresholdExclusionGenerator(CandidateGenerator):
 
         if len(x_candidates) == 0:
             # Fallback: uniform random
-            Xs = self.domain.inverse_transform(
-                self._rng.uniform(size=(n_candidates, self.domain.dim))
-            )
+            Xs = self.domain.inverse_transform(self._rng.uniform(size=(n_candidates, self.domain.dim)))
             Ss = self._assign_fidelities(n_candidates)
             return Xs, Ss
 
         # Apply proximity exclusion
         x_selected, _, _ = _greedy_exclusion(
-            x_candidates, y_pred[mask], prob_candidates,
-            n_candidates, self.rejection_radius, self.n_clusters,
+            x_candidates,
+            y_pred[mask],
+            prob_candidates,
+            n_candidates,
+            self.rejection_radius,
+            self.n_clusters,
         )
 
         if len(x_selected) == 0:
-            Xs = self.domain.inverse_transform(
-                self._rng.uniform(size=(n_candidates, self.domain.dim))
-            )
+            Xs = self.domain.inverse_transform(self._rng.uniform(size=(n_candidates, self.domain.dim)))
         else:
             Xs = x_selected
 
@@ -422,9 +419,7 @@ def _probabilistic_threshold_filter(
         prediction = predictions[target_fidelity]
     else:
         if "mean" not in predictions.keys():
-            raise ValueError(
-                "mean missing from predictions.keys(), did you miss target_fidelity or target_key inputs?"
-            )
+            raise ValueError("mean missing from predictions.keys(), did you miss target_fidelity or target_key inputs?")
         prediction = predictions
 
     mean = prediction["mean"].flatten()
