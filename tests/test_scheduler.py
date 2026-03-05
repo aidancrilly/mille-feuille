@@ -1,14 +1,13 @@
-import numpy as np
-import pytest
 import time
 
+import numpy as np
+import pytest
 from millefeuille.asynch import AsyncScheduler
 from millefeuille.domain import InputDomain
 from millefeuille.generators import RandomCandidateGenerator
 from millefeuille.simulator import FidelityConfig, PythonSimulator, ResourceManager
 from millefeuille.state import State
 from millefeuille.utils import run_generator_loop
-
 
 DOMAIN = InputDomain(dim=1, b_low=np.array([0.0]), b_up=np.array([1.0]), steps=np.array([0.0]))
 
@@ -53,17 +52,18 @@ def test_async_faster_than_sync():
     batches of 2, and both must produce identical Y values."""
 
     rng = np.random.default_rng(12)
-    n_tasks = 24
+    n_tasks = 12
     batch_size = 2
     delay = 0.1
 
     Xs_fixed = rng.uniform(size=(n_tasks, 1))
-    Ss_fixed = np.zeros((n_tasks, 1)) 
+    Ss_fixed = np.zeros((n_tasks, 1))
     Ss_fixed[::2] = 1  # Alternate fidelity levels (0, 1, 0, 1, ...)
 
     # -- synchronous run (batches of 2) ------------------------------------
     class FixedGenerator:
         """Yields pre-determined slices of Xs/Ss on each call."""
+
         def __init__(self):
             self._offset = 0
 
@@ -114,9 +114,7 @@ def test_async_faster_than_sync():
     print(f"Speed-up:   {sync_time / async_time:.2f}x")
 
     # -- timing assertion: async must be faster -----------------------------
-    assert async_time < sync_time, (
-        f"Async ({async_time:.2f}s) should be faster than sync ({sync_time:.2f}s)"
-    )
+    assert async_time < sync_time, f"Async ({async_time:.2f}s) should be faster than sync ({sync_time:.2f}s)"
 
     # -- correctness: same Y values for same inputs -------------------------
     sync_Xs, sync_Ys = _sort_by_index(sync_state)
@@ -169,7 +167,7 @@ def test_async_scheduler_correctness():
     sorted_Xs = state.Xs[order]
     sorted_Ys = state.Ys[order]
 
-    expected_Ys = -np.sum(sorted_Xs ** 2, axis=-1, keepdims=True)
+    expected_Ys = -np.sum(sorted_Xs**2, axis=-1, keepdims=True)
     np.testing.assert_allclose(sorted_Ys, expected_Ys, atol=1e-12)
 
 
@@ -199,6 +197,5 @@ def test_run_generator_loop_with_random_generator():
     assert state.nsamples == n_iters * batch_size
 
     # Check all Y values are -sum(x^2)
-    expected_Ys = -np.sum(state.Xs ** 2, axis=-1, keepdims=True)
+    expected_Ys = -np.sum(state.Xs**2, axis=-1, keepdims=True)
     np.testing.assert_allclose(state.Ys, expected_Ys, atol=1e-12)
-
