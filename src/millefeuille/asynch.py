@@ -369,7 +369,7 @@ def run_async_loop(
     X_init, S_init = _call_generator(generate_candidates, state, initial_budget)
 
     n_init = X_init.shape[0]
-    index_start = int(state.index.max()) + 1
+    index_start = int(state.index.max()) + 1 if state.index is not None else 0
     idx_init = index_start + np.arange(n_init)
     initial_tasks = async_sched.create_tasks(idx_init, X_init, S_init)
 
@@ -404,7 +404,7 @@ def run_async_loop(
             X_new, S_new = _call_generator(generate_candidates, state, budget)
 
             n_new = X_new.shape[0]
-            idx_start = int(state.index.max()) + 1
+            idx_start = int(state.index.max()) + 1 if state.index is not None else 0
             idx_new = idx_start + np.arange(n_new)
             new_tasks = async_sched.create_tasks(idx_new, X_new, S_new)
 

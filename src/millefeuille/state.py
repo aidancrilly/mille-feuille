@@ -47,6 +47,9 @@ def remove_nan_rows(arrays):
     # Identify non-None arrays
     valid_arrays = [arr for arr in arrays if arr is not None]
 
+    if len(valid_arrays) == 0:
+        return arrays
+
     # Find indices with NaNs across any of the valid arrays
     nan_mask = np.zeros(valid_arrays[0].shape[0], dtype=bool)
     for arr in valid_arrays:
@@ -168,9 +171,12 @@ class State:
         )
 
         # Check name lengths against arrays
-        self.index_names = self.auto_naming_and_check(self.index_names, self.index.shape, default_prefix="index_")
-        self.X_names = self.auto_naming_and_check(self.X_names, self.Xs.shape, default_prefix="x_")
-        self.Y_names = self.auto_naming_and_check(self.Y_names, self.Ys.shape, default_prefix="y_")
+        if self.index is not None:
+            self.index_names = self.auto_naming_and_check(self.index_names, self.index.shape, default_prefix="index_")
+        if self.Xs is not None:
+            self.X_names = self.auto_naming_and_check(self.X_names, self.Xs.shape, default_prefix="x_")
+        if self.Ys is not None:
+            self.Y_names = self.auto_naming_and_check(self.Y_names, self.Ys.shape, default_prefix="y_")
         if self.Ps is not None:
             self.P_names = self.auto_naming_and_check(self.P_names, self.Ps.shape, default_prefix="p_")
         if self.Ss is not None:
@@ -193,14 +199,22 @@ class State:
         # Remove NaN-ed indices
         index_next, X_next, Y_next, P_next, S_next = remove_nan_rows([index_next, X_next, Y_next, P_next, S_next])
 
-        self.index = np.append(self.index, index_next, axis=0)
+        self.index = np.append(self.index, index_next, axis=0) if self.index is not None else index_next
 
-        self.Xs = np.append(self.Xs, X_next, axis=0)
-        self.Ys = np.append(self.Ys, Y_next, axis=0)
+        self.Xs = np.append(self.Xs, X_next, axis=0) if self.Xs is not None else X_next
+        self.Ys = np.append(self.Ys, Y_next, axis=0) if self.Ys is not None else Y_next
         if P_next is not None:
-            self.Ps = np.append(self.Ps, P_next, axis=0)
+            self.Ps = np.append(self.Ps, P_next, axis=0) if self.Ps is not None else P_next
         if S_next is not None:
-            self.Ss = np.append(self.Ss, S_next, axis=0)
+            self.Ss = np.append(self.Ss, S_next, axis=0) if self.Ss is not None else S_next
+
+        # Lazily assign names on first update if they were not set at init
+        if self.index_names is None:
+            self.index_names = self.auto_naming_and_check(None, self.index.shape, default_prefix="index_")
+        if self.X_names is None:
+            self.X_names = self.auto_naming_and_check(None, self.Xs.shape, default_prefix="x_")
+        if self.Y_names is None:
+            self.Y_names = self.auto_naming_and_check(None, self.Ys.shape, default_prefix="y_")
 
         if refit_scaler and self.Ys.shape[0] > 1:
             self.Y_scaler.fit(self.Ys)

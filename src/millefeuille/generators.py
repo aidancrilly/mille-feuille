@@ -81,7 +81,7 @@ class CandidateGenerator(ABC):
         """
         Xs, Ss = self.generate(state, n_candidates)
         n = Xs.shape[0]
-        index_start = int(state.index.max()) + 1
+        index_start = int(state.index.max()) + 1 if state.index is not None else 0
         indices = index_start + np.arange(n)
         return indices, Xs, Ss
 
