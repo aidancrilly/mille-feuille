@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+import json
 import numpy as np
 from botorch.acquisition.utils import project_to_target_fidelity
 
@@ -42,6 +43,32 @@ class InputDomain:
         self.discrete_indices = [i for i in range(self.dim) if self.steps[i] != 0.0]
         self.discrete_dim = len(self.discrete_indices)
         self.discrete_bound = [int((self.b_up[i] - self.b_low[i]) / self.steps[i]) for i in self.discrete_indices]
+
+    @staticmethod
+    def read_json(filepath: str) -> tuple["InputDomain", list[str]]:
+        """Create an ``InputDomain`` from a JSON configuration file.
+
+        The JSON file must contain a ``"params"`` object with keys
+        ``"names"``, ``"lower_bounds"``, ``"upper_bounds"`` and ``"steps"``.
+
+        Parameters:
+            filepath: Path to the JSON file.
+
+        Returns:
+            A tuple ``(domain, X_names)`` where *domain* is the constructed
+            ``InputDomain`` and *X_names* is the list of parameter names.
+        """
+        with open(filepath, "r") as f:
+            cfg = json.load(f)
+
+        params = cfg["params"]
+        names = params["names"]
+        b_low = np.array(params["lower_bounds"])
+        b_up = np.array(params["upper_bounds"])
+        steps = np.array(params["steps"])
+
+        domain = InputDomain(dim=len(names), b_low=b_low, b_up=b_up, steps=steps)
+        return domain, names
 
     def get_bounds(self):
         """Get the bounds of the normalized domain [0, 1]^d.

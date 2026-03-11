@@ -25,6 +25,13 @@ dev = [
     "pytest-cases",
     "f90nml",
 ]
+dashboard = [
+    "streamlit",
+    "corner",
+]
+
+[project.scripts]
+mf-dashboard = "millefeuille.dashboard:main"
 
 [build-system]
 requires = ["setuptools", "wheel"]
