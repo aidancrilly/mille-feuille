@@ -1,5 +1,6 @@
-import fileinput
+import os
 import shutil
+import tempfile
 
 import f90nml
 import numpy as np
@@ -110,10 +111,20 @@ class Simulator(ExectuableSimulator):
 
     @staticmethod
     def replace_inputs(input_file, parameter_dict):
-        for line in fileinput.input(input_file, inplace=True):
-            for key, value in parameter_dict.items():
-                # Check that key is in line and isn't a substring
-                # lower() makes sure is case insensitive
-                if key.lower() == line.split("=")[0].strip().lower():
-                    line = f"\t{key} = {value} \n"
-            print(line, end="")
+        with open(input_file, "r") as f:
+            lines = f.readlines()
+        # Write to a temporary file, then atomically replace the original.
+        # This avoids global state issues that fileinput.input(inplace=True)
+        # has (module-level _state and sys.stdout redirection), which are
+        # not safe when called repeatedly in a loop or from multiple threads.
+        dir_name = os.path.dirname(input_file) or "."
+        with tempfile.NamedTemporaryFile(mode="w", dir=dir_name, delete=False, suffix=".tmp") as tmp:
+            tmp_path = tmp.name
+            for line in lines:
+                for key, value in parameter_dict.items():
+                    # Check that key is in line and isn't a substring
+                    # lower() makes sure is case insensitive
+                    if key.lower() == line.split("=")[0].strip().lower():
+                        line = f"\t{key} = {value} \n"
+                tmp.write(line)
+        os.replace(tmp_path, input_file)
