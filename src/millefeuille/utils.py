@@ -1,6 +1,8 @@
-import numpy as np
-from scipy.stats import norm
-
+from .generators import (
+    BayesianOptimisationGenerator,
+    _greedy_exclusion,
+    _probabilistic_threshold_filter,
+)
 from .optimise import *
 from .simulator import *
 from .surrogate import BaseSurrogate
@@ -43,40 +45,17 @@ def probabilistic_threshold_sampling(
         prob: predicted P(y > threshold) for each point
         mask: boolean array of points that passed the stochastic filter
     """
-    # Generate inputs
-    x_unit = sampler.random(initial_samples)
-    x_all = domain.inverse_transform(x_unit)
-
-    # Predict mean and std from GP
-    predictions = surrogate.predict(state, x_all)
-
-    if target_key is not None:
-        prediction = predictions[target_key]
-    else:
-        if target_fidelity is not None:
-            prediction = predictions[target_fidelity]
-        else:
-            if "mean" not in predictions.keys():
-                raise ValueError(
-                    "mean missing from predictions.keys(), did you miss target_fidelity or target_key inputs?"
-                )
-            prediction = predictions
-
-    mean, std = prediction["mean"], prediction["std"]
-
-    # Compute probability P(y > threshold)
-    mean = mean.flatten()
-    std = std.flatten()
-    prob = 1.0 - norm.cdf(threshold_value, loc=mean, scale=std)
-
-    # Generate random draws
-    if random_draws is None:
-        random_draws = np.random.rand(initial_samples)
-
-    mask = prob > random_draws
-    y_pred = mean
-
-    return x_all, y_pred, prob, mask
+    return _probabilistic_threshold_filter(
+        domain=domain,
+        state=state,
+        sampler=sampler,
+        surrogate=surrogate,
+        pool_size=initial_samples,
+        threshold_value=threshold_value,
+        target_fidelity=target_fidelity,
+        target_key=target_key,
+        random_draws=random_draws,
+    )
 
 
 def surrogate_threshold_sampling(
@@ -173,14 +152,13 @@ def probabilistic_threshold_sampling_with_exclusion(
         y_selected: predicted means at selected points (shape: K,)
         prob_selected: predicted P(y > threshold) at selected points (shape: K,)
     """
-    # Step 1: Draw candidates and apply probabilistic threshold filter
-    x_all, y_pred, prob, mask = probabilistic_threshold_sampling(
-        domain,
-        state,
-        sampler,
-        surrogate,
-        initial_samples,
-        threshold_value,
+    x_all, y_pred, prob, mask = _probabilistic_threshold_filter(
+        domain=domain,
+        state=state,
+        sampler=sampler,
+        surrogate=surrogate,
+        pool_size=initial_samples,
+        threshold_value=threshold_value,
         target_fidelity=target_fidelity,
         target_key=target_key,
         random_draws=random_draws,
@@ -193,73 +171,14 @@ def probabilistic_threshold_sampling_with_exclusion(
     if len(x_candidates) == 0:
         return x_candidates, y_candidates, prob_candidates
 
-    n_candidates, n_dims = x_candidates.shape
-
-    # Step 2: Cluster analysis — fall back gracefully if too few points
-    n_clusters_actual = min(n_clusters, n_candidates)
-    if n_clusters_actual > 1:
-        from scipy.cluster.vq import kmeans2
-
-        _, labels = kmeans2(x_candidates, n_clusters_actual, minit="points", seed=0)
-    else:
-        labels = np.zeros(n_candidates, dtype=int)
-        n_clusters_actual = 1
-
-    # Step 3: PCA-normalise within each cluster
-    x_normalised = np.empty_like(x_candidates)
-    for k in range(n_clusters_actual):
-        cluster_mask = labels == k
-        x_cluster = x_candidates[cluster_mask]
-
-        if len(x_cluster) == 0:
-            continue
-
-        mean = x_cluster.mean(axis=0)
-        x_centered = x_cluster - mean
-
-        if len(x_cluster) == 1 or n_dims == 1:
-            # Scalar normalisation along each dimension
-            std = x_centered.std(axis=0)
-            std = np.where(std > 0, std, 1.0)
-            x_normalised[cluster_mask] = x_centered / std
-        else:
-            cov = np.cov(x_centered.T)
-            eigenvalues, eigenvectors = np.linalg.eigh(cov)
-            eigenvalues = np.maximum(eigenvalues, 1e-10)
-            x_normalised[cluster_mask] = x_centered @ eigenvectors / np.sqrt(eigenvalues)
-
-    # Step 4: Greedy selection with rejection based on distance in normalised space.
-    # Exclusion is applied within each cluster independently, since the PCA
-    # normalised coordinates have different origins and scales per cluster.
-    # Prioritise highest-probability candidates.
-    sort_idx = np.argsort(-prob_candidates)
-
-    selected_indices = []
-    # Map cluster label -> list of already-selected normalised coordinates in that cluster
-    selected_normalised_per_cluster = {k: [] for k in range(n_clusters_actual)}
-
-    for idx in sort_idx:
-        if len(selected_indices) >= batch_size:
-            break
-
-        cluster_k = labels[idx]
-        x_norm_i = x_normalised[idx]
-        already_selected = selected_normalised_per_cluster[cluster_k]
-
-        if len(already_selected) == 0:
-            selected_indices.append(idx)
-            already_selected.append(x_norm_i)
-        else:
-            dists = np.linalg.norm(np.array(already_selected) - x_norm_i, axis=1)
-            if np.all(dists >= rejection_radius):
-                selected_indices.append(idx)
-                already_selected.append(x_norm_i)
-
-    if len(selected_indices) == 0:
-        return np.empty((0, n_dims)), np.empty(0), np.empty(0)
-
-    selected_indices = np.array(selected_indices)
-    return x_candidates[selected_indices], y_candidates[selected_indices], prob_candidates[selected_indices]
+    return _greedy_exclusion(
+        x_candidates,
+        y_candidates,
+        prob_candidates,
+        batch_size,
+        rejection_radius,
+        n_clusters,
+    )
 
 
 def run_Bayesian_optimiser(
@@ -279,19 +198,74 @@ def run_Bayesian_optimiser(
         raise Exception
     assert isinstance(surrogate, BaseSurrogate)
 
+    generator = BayesianOptimisationGenerator(
+        domain=state.input_domain,
+        surrogate=surrogate,
+        generate_acq_fn=generate_acq_function,
+        refit_surrogate=True,
+        verbose=verbose,
+        **kwargs,
+    )
+
+    return run_generator_loop(
+        Nsamples=Nsamples,
+        batch_size=batch_size,
+        generate_candidates=generator,
+        state=state,
+        simulator=simulator,
+        scheduler=scheduler,
+        csv_name=csv_name,
+    )
+
+
+def run_generator_loop(
+    Nsamples,
+    batch_size,
+    generate_candidates,
+    state,
+    simulator,
+    scheduler=None,
+    csv_name=None,
+):
+    """Synchronous generate-evaluate loop with a pluggable candidate generator.
+
+    Generalises ``run_Bayesian_optimiser`` to accept any ``CandidateGenerator``
+    instance or plain callable.  Each iteration generates *batch_size*
+    candidates, evaluates them with the simulator, and updates the state.
+
+    Parameters:
+        Nsamples:           Number of generate-evaluate iterations.
+        batch_size:         Candidates requested per iteration.
+        generate_candidates:
+            A ``CandidateGenerator`` instance or a callable with signature::
+
+                generate_candidates(state, n) -> (indices, Xs, Ss | None)
+
+            * *state* — current ``State``.
+            * *n* — how many candidates are requested.
+            * Returns ``indices`` (1-D int array), ``Xs`` (N x dim),
+              and ``Ss`` (N x 1 or ``None``).
+
+            If a ``CandidateGenerator`` is passed its ``__call__`` method
+            is used directly.  A plain callable must return the same
+            3-tuple.
+        state:              Current ``State``.
+        simulator:          ``ExectuableSimulator`` or ``PythonSimulator``.
+        scheduler:          ``Scheduler`` instance (required for
+                            ``ExectuableSimulator``).
+        csv_name:           Optional CSV path to persist state after each
+                            iteration.
+
+    Returns:
+        Updated ``State``.
+    """
+    if isinstance(simulator, ExectuableSimulator) and scheduler is None:
+        print("If simulator is an ExecutableSimulator, you must provide a scheduler")
+        raise Exception
+
     for _ in range(Nsamples):
-        surrogate.fit(state)
-        acq_function = generate_acq_function(surrogate, state)
+        index_next, X_next, S_next = generate_candidates(state, batch_size)
 
-        if state.l_MultiFidelity:
-            X_next, S_next = suggest_next_locations(
-                batch_size, state, acq_function=acq_function, verbose=verbose, **kwargs
-            )
-        else:
-            X_next = suggest_next_locations(batch_size, state, acq_function=acq_function, verbose=verbose, **kwargs)
-            S_next = None
-
-        index_next = state.index[-1] + np.arange(batch_size) + 1
         if isinstance(simulator, ExectuableSimulator):
             P_next, Y_next = simulator(index_next, X_next, scheduler, Ss=S_next)
         elif isinstance(simulator, PythonSimulator):
