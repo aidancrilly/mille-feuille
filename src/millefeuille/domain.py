@@ -54,6 +54,32 @@ class InputDomain:
         ub = np.ones(self.dim)
         bounds = np.stack([lb, ub])
         return bounds
+    
+    @staticmethod
+    def read_json(filepath: str) -> tuple["InputDomain", list[str]]:
+        """Create an ``InputDomain`` from a JSON configuration file.
+
+        The JSON file must contain a ``"params"`` object with keys
+        ``"names"``, ``"lower_bounds"``, ``"upper_bounds"`` and ``"steps"``.
+
+        Parameters:
+            filepath: Path to the JSON file.
+
+        Returns:
+            A tuple ``(domain, X_names)`` where *domain* is the constructed
+            ``InputDomain`` and *X_names* is the list of parameter names.
+        """
+        with open(filepath, "r") as f:
+            cfg = json.load(f)
+
+        params = cfg["params"]
+        names = params["names"]
+        b_low = np.array(params["lower_bounds"])
+        b_up = np.array(params["upper_bounds"])
+        steps = np.array(params["steps"])
+
+        domain = InputDomain(dim=len(names), b_low=b_low, b_up=b_up, steps=steps)
+        return domain, names
 
     def transform(self, X):
         """Transform a batch of points from real units to normalized [0, 1]^d units.
