@@ -7,7 +7,6 @@ import shutil
 import millefeuille as mf
 import numpy as np
 import pandas as pd
-from scipy.stats import qmc
 
 
 def get_training_data(output_file, dim):

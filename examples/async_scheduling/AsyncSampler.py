@@ -29,22 +29,21 @@ Usage:
     python AsyncSampler.py
 """
 
-from scipy.stats.qmc import Sobol
-
 from millefeuille.asynch import run_async_loop
 from millefeuille.domain import InputDomain
 from millefeuille.generators import CandidateGenerator, _probabilistic_threshold_filter
 from millefeuille.simulator import ResourceManager
 from millefeuille.state import State
 from millefeuille.surrogate import RandomForestEnsembleModel
-
 from Scheduler import MPIScheduler
+from scipy.stats.qmc import Sobol
 from Simulator import Simulator
 
 EXECUTABLE = "path_to_your_executable"
 
 
 # ── Candidate generator ──────────────────────────────────────────────────────
+
 
 class RandomThenThresholdCandidateGenerator(CandidateGenerator):
     """Switch from random sampling to surrogate-guided threshold sampling.
@@ -78,8 +77,12 @@ class RandomThenThresholdCandidateGenerator(CandidateGenerator):
             # Surrogate-guided threshold phase
             threshold_value = 0.1
             Xs, _, _ = _probabilistic_threshold_filter(
-                self.domain, state, self.sampler, self.surrogate,
-                self.n_randomsamples, threshold_value,
+                self.domain,
+                state,
+                self.sampler,
+                self.surrogate,
+                self.n_randomsamples,
+                threshold_value,
             )
             Xs = Xs[:n_candidates]
         return Xs, None

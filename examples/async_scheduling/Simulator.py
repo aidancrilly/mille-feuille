@@ -22,7 +22,6 @@ import shutil
 import f90nml
 import numpy as np
 import pandas as pd
-
 from millefeuille.simulator import ExectuableSimulator
 
 from Utils import safe_mkdir
@@ -86,10 +85,7 @@ class Simulator(ExectuableSimulator):
 
     def launch(self, indices, Xs, scheduler, Ss=None):
         """Invoke the scheduler to run the executable on prepared inputs."""
-        input_paths = [
-            f"{self.inputs_dir}input_{str(i).zfill(self.index_length)}.nml"
-            for i in indices
-        ]
+        input_paths = [f"{self.inputs_dir}input_{str(i).zfill(self.index_length)}.nml" for i in indices]
         str_indices = [str(i).zfill(self.index_length) for i in indices]
         scheduler.launch_jobs(self.exe, self.nproc, input_paths, str_indices)
 

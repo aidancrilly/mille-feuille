@@ -1,7 +1,7 @@
+import json
 from dataclasses import dataclass
 
 import numpy as np
-import json
 from botorch.acquisition.utils import project_to_target_fidelity
 
 """
@@ -55,7 +55,7 @@ class InputDomain:
         ub = np.ones(self.dim)
         bounds = np.stack([lb, ub])
         return bounds
-    
+
     @staticmethod
     def read_json(filepath: str) -> tuple["InputDomain", list[str]]:
         """Create an ``InputDomain`` from a JSON configuration file.
