@@ -16,7 +16,6 @@ It makes the following assumptions about the simulator:
   MPI ranks as specified in the input template.
 """
 
-import fileinput
 import shutil
 
 import f90nml
@@ -24,6 +23,7 @@ import numpy as np
 import pandas as pd
 from millefeuille.simulator import ExectuableSimulator
 
+# local utils
 from Utils import safe_mkdir
 
 
@@ -145,8 +145,15 @@ class Simulator(ExectuableSimulator):
     @staticmethod
     def replace_inputs(input_file, parameter_dict):
         """Overwrite namelist values that match keys in *parameter_dict*."""
-        for line in fileinput.input(input_file, inplace=True):
+        with open(input_file) as f:
+            lines = f.readlines()
+        new_lines = []
+        for line in lines:
             for key, value in parameter_dict.items():
+                # Check that key is in line and isn't a substring
+                # lower() makes sure is case insensitive
                 if key.lower() == line.split("=")[0].strip().lower():
                     line = f"\t{key} = {value} \n"
-            print(line, end="")
+            new_lines.append(line)
+        with open(input_file, "w") as f:
+            f.writelines(new_lines)
