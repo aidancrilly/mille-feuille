@@ -1,5 +1,4 @@
 import millefeuille as mf
-import numpy as np
 from Scheduler import PBSMPIScheduler, get_PBS_hosts
 from Simulator import Simulator
 

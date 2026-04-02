@@ -229,10 +229,12 @@ class ThresholdCandidateGenerator(CandidateGenerator):
 
     Draws a large pool of random candidates, predicts with the surrogate,
     and keeps those whose predicted probability of exceeding
-    ``threshold_value`` is greater than a random draw.  Candidates are
-    returned sorted by descending probability so that wrapper generators
-    (e.g. ``GreedyExclusionGenerator``) naturally prioritise the best
-    candidates.
+    ``threshold_value`` is greater than a random draw.
+
+    If fewer than ``n_candidates`` pass the filter on the first attempt
+    the pool size is multiplied by ``pool_try_multiplier`` and the draw
+    is repeated, up to ``max_retries`` times.  A ``RuntimeError`` is
+    raised if insufficient candidates are found after all retries.
 
     Parameters:
         domain:              ``InputDomain``.
@@ -249,6 +251,12 @@ class ThresholdCandidateGenerator(CandidateGenerator):
                              the stochastic filter (default 0.0).  Random
                              draws are sampled from
                              ``[min_probability, 1]`` instead of ``[0, 1]``.
+        sort_candidates:     If ``True`` the returned candidates are sorted
+                             by descending probability (default ``False``).
+        max_retries:         Maximum number of pool-expansion retries
+                             (default 5).
+        pool_try_multiplier: Factor by which the pool size grows on each
+                             retry (default 2).
     """
 
     def __init__(
@@ -263,6 +271,9 @@ class ThresholdCandidateGenerator(CandidateGenerator):
         target_fidelity: int | None = None,
         target_key=None,
         min_probability: float = 0.0,
+        sort_candidates: bool = False,
+        max_retries: int = 5,
+        pool_try_multiplier: int = 2,
         rng: np.random.Generator | None = None,
     ):
         super().__init__(domain)
@@ -275,36 +286,56 @@ class ThresholdCandidateGenerator(CandidateGenerator):
         self.target_fidelity = target_fidelity
         self.target_key = target_key
         self.min_probability = min_probability
+        self.sort_candidates = sort_candidates
+        self.max_retries = max_retries
+        self.pool_try_multiplier = pool_try_multiplier
         self._rng = rng or np.random.default_rng()
 
     def generate(self, state, n_candidates):
         if self.refit_surrogate:
             self.surrogate.fit(state)
 
-        x_all, _, prob, mask = probabilistic_threshold_filter(
-            domain=self.domain,
-            state=state,
-            sampler=self.sampler,
-            surrogate=self.surrogate,
-            pool_size=self.pool_size,
-            threshold_value=self.threshold_value,
-            target_fidelity=self.target_fidelity,
-            target_key=self.target_key,
-            min_probability=self.min_probability,
-        )
+        current_pool = self.pool_size
+        for attempt in range(1 + self.max_retries):
+            x_all, _, prob, mask = probabilistic_threshold_filter(
+                domain=self.domain,
+                state=state,
+                sampler=self.sampler,
+                surrogate=self.surrogate,
+                pool_size=current_pool,
+                threshold_value=self.threshold_value,
+                target_fidelity=self.target_fidelity,
+                target_key=self.target_key,
+                min_probability=self.min_probability,
+            )
 
-        x_pass = x_all[mask]
-        prob_pass = prob[mask]
+            x_pass = x_all[mask]
+            prob_pass = prob[mask]
+
+            if len(x_pass) >= n_candidates:
+                break
+            current_pool *= self.pool_try_multiplier
 
         if len(x_pass) == 0:
-            # Fallback: uniform random
-            x_pass = self.domain.inverse_transform(self._rng.uniform(size=(n_candidates, self.domain.dim)))
-        else:
-            # Sort by descending probability (highest first)
+            raise RuntimeError(
+                f"ThresholdCandidateGenerator: no candidates passed the "
+                f"threshold after {1 + self.max_retries} attempts "
+                f"(final pool size {current_pool})."
+            )
+        if len(x_pass) < n_candidates:
+            raise RuntimeError(
+                f"ThresholdCandidateGenerator: only {len(x_pass)} of "
+                f"{n_candidates} requested candidates passed the threshold "
+                f"after {1 + self.max_retries} attempts "
+                f"(final pool size {current_pool})."
+            )
+
+        if self.sort_candidates:
             order = np.argsort(-prob_pass)
             x_pass = x_pass[order]
-            if len(x_pass) > n_candidates:
-                x_pass = x_pass[:n_candidates]
+
+        if len(x_pass) > n_candidates:
+            x_pass = x_pass[:n_candidates]
 
         Ss = self._assign_fidelities(len(x_pass))
         return x_pass, Ss
@@ -328,6 +359,11 @@ class SurrogateThresholdCandidateGenerator(CandidateGenerator):
     Draws a pool of random candidates, evaluates the surrogate, and keeps
     those whose predicted mean exceeds ``threshold_value``.
 
+    If fewer than ``n_candidates`` pass the filter on the first attempt
+    the pool size is multiplied by ``pool_try_multiplier`` and the draw
+    is repeated, up to ``max_retries`` times.  A ``RuntimeError`` is
+    raised if insufficient candidates are found after all retries.
+
     Parameters:
         domain:              ``InputDomain``.
         sampler:             QMC sampler with ``.random(n)`` method.
@@ -339,6 +375,12 @@ class SurrogateThresholdCandidateGenerator(CandidateGenerator):
                              assignment on selected candidates.
         target_fidelity:     Forwarded to surrogate prediction.
         target_key:          Forwarded to surrogate prediction.
+        sort_candidates:     If ``True`` the returned candidates are sorted
+                             by descending predicted mean (default ``False``).
+        max_retries:         Maximum number of pool-expansion retries
+                             (default 5).
+        pool_try_multiplier: Factor by which the pool size grows on each
+                             retry (default 2).
     """
 
     def __init__(
@@ -352,6 +394,9 @@ class SurrogateThresholdCandidateGenerator(CandidateGenerator):
         fidelity_probs: dict[int, float] | None = None,
         target_fidelity: int | None = None,
         target_key=None,
+        sort_candidates: bool = False,
+        max_retries: int = 5,
+        pool_try_multiplier: int = 2,
         rng: np.random.Generator | None = None,
     ):
         super().__init__(domain)
@@ -363,42 +408,63 @@ class SurrogateThresholdCandidateGenerator(CandidateGenerator):
         self.fidelity_probs = fidelity_probs
         self.target_fidelity = target_fidelity
         self.target_key = target_key
+        self.sort_candidates = sort_candidates
+        self.max_retries = max_retries
+        self.pool_try_multiplier = pool_try_multiplier
         self._rng = rng or np.random.default_rng()
 
     def generate(self, state, n_candidates):
         if self.refit_surrogate:
             self.surrogate.fit(state)
 
-        x_unit = self.sampler.random(self.pool_size)
-        x_all = self.domain.inverse_transform(x_unit)
+        current_pool = self.pool_size
+        for attempt in range(1 + self.max_retries):
+            x_unit = self.sampler.random(current_pool)
+            x_all = self.domain.inverse_transform(x_unit)
 
-        predictions = self.surrogate.predict(state, x_all)
+            predictions = self.surrogate.predict(state, x_all)
 
-        if self.target_key is not None:
-            prediction = predictions[self.target_key]
-        elif self.target_fidelity is not None:
-            prediction = predictions[self.target_fidelity]
-        else:
-            if "mean" not in predictions.keys():
-                raise ValueError(
-                    "mean missing from predictions.keys(), did you miss target_fidelity or target_key inputs?"
-                )
-            prediction = predictions
+            if self.target_key is not None:
+                prediction = predictions[self.target_key]
+            elif self.target_fidelity is not None:
+                prediction = predictions[self.target_fidelity]
+            else:
+                if "mean" not in predictions.keys():
+                    raise ValueError(
+                        "mean missing from predictions.keys(), did you miss target_fidelity or target_key inputs?"
+                    )
+                prediction = predictions
 
-        mean = prediction["mean"].flatten()
-        mask = mean > self.threshold_value
+            mean = prediction["mean"].flatten()
+            mask = mean > self.threshold_value
 
-        x_pass = x_all[mask]
-        mean_pass = mean[mask]
+            x_pass = x_all[mask]
+            mean_pass = mean[mask]
+
+            if len(x_pass) >= n_candidates:
+                break
+            current_pool *= self.pool_try_multiplier
 
         if len(x_pass) == 0:
-            x_pass = self.domain.inverse_transform(self._rng.uniform(size=(n_candidates, self.domain.dim)))
-        else:
-            # Sort by descending predicted mean (best first)
+            raise RuntimeError(
+                f"SurrogateThresholdCandidateGenerator: no candidates exceeded "
+                f"the threshold after {1 + self.max_retries} attempts "
+                f"(final pool size {current_pool})."
+            )
+        if len(x_pass) < n_candidates:
+            raise RuntimeError(
+                f"SurrogateThresholdCandidateGenerator: only {len(x_pass)} of "
+                f"{n_candidates} requested candidates exceeded the threshold "
+                f"after {1 + self.max_retries} attempts "
+                f"(final pool size {current_pool})."
+            )
+
+        if self.sort_candidates:
             order = np.argsort(-mean_pass)
             x_pass = x_pass[order]
-            if len(x_pass) > n_candidates:
-                x_pass = x_pass[:n_candidates]
+
+        if len(x_pass) > n_candidates:
+            x_pass = x_pass[:n_candidates]
 
         Ss = self._assign_fidelities(len(x_pass))
         return x_pass, Ss
@@ -487,6 +553,11 @@ class ThresholdExclusionGenerator(CandidateGenerator):
     Like ``ThresholdCandidateGenerator`` but applies PCA-normalised
     distance-based rejection to avoid tightly clustered candidates.
 
+    If fewer than ``n_candidates`` survive the threshold *and* exclusion
+    steps, the pool size is multiplied by ``pool_try_multiplier`` and
+    the draw is repeated, up to ``max_retries`` times.  A
+    ``RuntimeError`` is raised if insufficient candidates are found.
+
     Parameters:
         domain:              ``InputDomain``.
         sampler:             QMC sampler with ``.random(n)`` method.
@@ -500,6 +571,15 @@ class ThresholdExclusionGenerator(CandidateGenerator):
                              assignment on selected candidates.
         target_fidelity:     Forwarded to surrogate prediction.
         target_key:          Forwarded to surrogate prediction.
+        sort_candidates:     If ``True`` candidates passed to the exclusion
+                             step are sorted by descending probability
+                             (default ``True``).  The exclusion step
+                             always processes candidates in the order
+                             given.
+        max_retries:         Maximum number of pool-expansion retries
+                             (default 5).
+        pool_try_multiplier: Factor by which the pool size grows on each
+                             retry (default 2).
     """
 
     def __init__(
@@ -515,6 +595,9 @@ class ThresholdExclusionGenerator(CandidateGenerator):
         fidelity_probs: dict[int, float] | None = None,
         target_fidelity: int | None = None,
         target_key=None,
+        sort_candidates: bool = True,
+        max_retries: int = 5,
+        pool_try_multiplier: int = 2,
         rng: np.random.Generator | None = None,
     ):
         super().__init__(domain)
@@ -528,45 +611,56 @@ class ThresholdExclusionGenerator(CandidateGenerator):
         self.fidelity_probs = fidelity_probs
         self.target_fidelity = target_fidelity
         self.target_key = target_key
+        self.sort_candidates = sort_candidates
+        self.max_retries = max_retries
+        self.pool_try_multiplier = pool_try_multiplier
         self._rng = rng or np.random.default_rng()
 
     def generate(self, state, n_candidates):
         if self.refit_surrogate:
             self.surrogate.fit(state)
 
-        x_all, y_pred, prob, mask = probabilistic_threshold_filter(
-            domain=self.domain,
-            state=state,
-            sampler=self.sampler,
-            surrogate=self.surrogate,
-            pool_size=self.pool_size,
-            threshold_value=self.threshold_value,
-            target_fidelity=self.target_fidelity,
-            target_key=self.target_key,
+        current_pool = self.pool_size
+        for attempt in range(1 + self.max_retries):
+            x_all, y_pred, prob, mask = probabilistic_threshold_filter(
+                domain=self.domain,
+                state=state,
+                sampler=self.sampler,
+                surrogate=self.surrogate,
+                pool_size=current_pool,
+                threshold_value=self.threshold_value,
+                target_fidelity=self.target_fidelity,
+                target_key=self.target_key,
+            )
+
+            x_candidates = x_all[mask]
+            prob_candidates = prob[mask]
+
+            if len(x_candidates) == 0:
+                current_pool *= self.pool_try_multiplier
+                continue
+
+            if self.sort_candidates:
+                order = np.argsort(-prob_candidates)
+                x_candidates = x_candidates[order]
+
+            selected_idx = greedy_exclusion(x_candidates, n_candidates, self.rejection_radius, self.n_clusters)
+
+            if len(selected_idx) >= n_candidates:
+                Xs = x_candidates[selected_idx]
+                Ss = self._assign_fidelities(len(Xs))
+                return Xs, Ss
+
+            current_pool *= self.pool_try_multiplier
+
+        # All retries exhausted
+        n_survived = len(selected_idx) if len(x_candidates) > 0 else 0
+        raise RuntimeError(
+            f"ThresholdExclusionGenerator: only {n_survived} of "
+            f"{n_candidates} requested candidates survived threshold + "
+            f"exclusion after {1 + self.max_retries} attempts "
+            f"(final pool size {current_pool // self.pool_try_multiplier})."
         )
-
-        x_candidates = x_all[mask]
-        prob_candidates = prob[mask]
-
-        if len(x_candidates) == 0:
-            # Fallback: uniform random
-            Xs = self.domain.inverse_transform(self._rng.uniform(size=(n_candidates, self.domain.dim)))
-            Ss = self._assign_fidelities(n_candidates)
-            return Xs, Ss
-
-        # Sort by descending probability then apply exclusion
-        order = np.argsort(-prob_candidates)
-        x_sorted = x_candidates[order]
-
-        selected_idx = greedy_exclusion(x_sorted, n_candidates, self.rejection_radius, self.n_clusters)
-
-        if len(selected_idx) == 0:
-            Xs = self.domain.inverse_transform(self._rng.uniform(size=(n_candidates, self.domain.dim)))
-        else:
-            Xs = x_sorted[selected_idx]
-
-        Ss = self._assign_fidelities(len(Xs))
-        return Xs, Ss
 
     def _assign_fidelities(self, n: int) -> npt.NDArray | None:
         if self.fidelity_probs is None:

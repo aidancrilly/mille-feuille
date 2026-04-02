@@ -154,9 +154,7 @@ def test_singlefidelity_threshold_with_greedy_exclusion(
     assert len(x_sel) <= batch_size, "More points returned than batch_size"
 
     # Probabilities must be in [0, 1]
-    assert np.all(prob_sel <= 1.0) and np.all(prob_sel >= 0.0), (
-        "greedy_exclusion returning impossible prob values"
-    )
+    assert np.all(prob_sel <= 1.0) and np.all(prob_sel >= 0.0), "greedy_exclusion returning impossible prob values"
 
     # Shapes of returned arrays must be consistent
     assert x_sel.shape == (len(x_sel), ForresterDomain.dim)
