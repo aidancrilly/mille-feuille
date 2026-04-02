@@ -6,7 +6,7 @@ This example demonstrates `mille-feuille`'s **asynchronous scheduling** capabili
 
 The workflow uses a two-phase sampling strategy:
 1. **Random phase** — Sobol quasi-random samples fill the design space.
-2. **Threshold phase** — once enough data is collected, a `RandomForestEnsembleModel` surrogate is trained and `_probabilistic_threshold_filter` biases sampling toward promising regions.
+2. **Threshold phase** — once enough data is collected, a `RandomForestEnsembleModel` surrogate is trained and `probabilistic_threshold_filter` biases sampling toward promising regions.
 
 > **Single-node restriction:** This example assumes all MPI jobs run on one compute node. The `MPIScheduler` launches jobs with plain `mpiexec` — no host files or multi-node placement. For multi-node PBS scheduling, see the `loops/` example.
 

@@ -1,17 +1,36 @@
 """
 Candidate generators for populating task queues.
 
-Provides a generic interface for methods that generate candidate points
+Provides a composable interface for methods that generate candidate points
 based on the current ``State``.  Each generator's ``__call__`` returns
 ``(indices, Xs, Ss)`` ready for consumption by the async scheduler or
 a synchronous evaluation loop.
 
-Key classes:
-    CandidateGenerator                = abstract base class
-    RandomCandidateGenerator          = uniform random sampling
-    BayesianOptimisationGenerator     = surrogate + acquisition function
-    ThresholdCandidateGenerator       = probabilistic threshold sampling
-    ThresholdExclusionGenerator       = threshold + proximity exclusion
+**Design philosophy — composable generators**
+
+Generators fall into two categories:
+
+*Base generators* produce candidates from scratch:
+    ``RandomCandidateGenerator``              — uniform / QMC sampling
+    ``BayesianOptimisationGenerator``         — surrogate + acquisition
+    ``ThresholdCandidateGenerator``           — probabilistic threshold sampling
+    ``SurrogateThresholdCandidateGenerator``  — deterministic surrogate threshold
+
+*Wrapper generators* refine the output of another generator:
+    ``GreedyExclusionGenerator``             — proximity-based exclusion
+
+Because every generator implements the same ``CandidateGenerator`` interface
+they can be freely composed::
+
+    generator = GreedyExclusionGenerator(
+        inner=ThresholdCandidateGenerator(domain, sampler, surrogate, ...),
+        rejection_radius=0.5,
+    )
+    indices, Xs, Ss = generator(state, batch_size)
+
+Public helper functions:
+    ``probabilistic_threshold_filter``  — draw + predict + threshold mask
+    ``greedy_exclusion``                — PCA-normalised proximity selection
 """
 
 from abc import ABC, abstractmethod
@@ -210,13 +229,110 @@ class ThresholdCandidateGenerator(CandidateGenerator):
 
     Draws a large pool of random candidates, predicts with the surrogate,
     and keeps those whose predicted probability of exceeding
-    ``threshold_value`` is greater than a random draw.
+    ``threshold_value`` is greater than a random draw.  Candidates are
+    returned sorted by descending probability so that wrapper generators
+    (e.g. ``GreedyExclusionGenerator``) naturally prioritise the best
+    candidates.
 
     Parameters:
         domain:              ``InputDomain``.
         sampler:             QMC sampler with ``.random(n)`` method.
         surrogate:           Surrogate model instance.
         threshold_value:     Threshold for the probabilistic filter.
+        pool_size:           Size of the initial random pool drawn each call.
+        refit_surrogate:     Refit surrogate before predicting (default True).
+        fidelity_probs:      Optional ``{fidelity: prob}`` for fidelity
+                             assignment on selected candidates.
+        target_fidelity:     Forwarded to surrogate prediction.
+        target_key:          Forwarded to surrogate prediction.
+        min_probability:     Minimum probability for a candidate to pass
+                             the stochastic filter (default 0.0).  Random
+                             draws are sampled from
+                             ``[min_probability, 1]`` instead of ``[0, 1]``.
+    """
+
+    def __init__(
+        self,
+        domain: InputDomain,
+        sampler,
+        surrogate: BaseSurrogate,
+        threshold_value: float,
+        pool_size: int = 256,
+        refit_surrogate: bool = True,
+        fidelity_probs: dict[int, float] | None = None,
+        target_fidelity: int | None = None,
+        target_key=None,
+        min_probability: float = 0.0,
+        rng: np.random.Generator | None = None,
+    ):
+        super().__init__(domain)
+        self.sampler = sampler
+        self.surrogate = surrogate
+        self.threshold_value = threshold_value
+        self.pool_size = pool_size
+        self.refit_surrogate = refit_surrogate
+        self.fidelity_probs = fidelity_probs
+        self.target_fidelity = target_fidelity
+        self.target_key = target_key
+        self.min_probability = min_probability
+        self._rng = rng or np.random.default_rng()
+
+    def generate(self, state, n_candidates):
+        if self.refit_surrogate:
+            self.surrogate.fit(state)
+
+        x_all, _, prob, mask = probabilistic_threshold_filter(
+            domain=self.domain,
+            state=state,
+            sampler=self.sampler,
+            surrogate=self.surrogate,
+            pool_size=self.pool_size,
+            threshold_value=self.threshold_value,
+            target_fidelity=self.target_fidelity,
+            target_key=self.target_key,
+            min_probability=self.min_probability,
+        )
+
+        x_pass = x_all[mask]
+        prob_pass = prob[mask]
+
+        if len(x_pass) == 0:
+            # Fallback: uniform random
+            x_pass = self.domain.inverse_transform(self._rng.uniform(size=(n_candidates, self.domain.dim)))
+        else:
+            # Sort by descending probability (highest first)
+            order = np.argsort(-prob_pass)
+            x_pass = x_pass[order]
+            if len(x_pass) > n_candidates:
+                x_pass = x_pass[:n_candidates]
+
+        Ss = self._assign_fidelities(len(x_pass))
+        return x_pass, Ss
+
+    def _assign_fidelities(self, n: int) -> npt.NDArray | None:
+        if self.fidelity_probs is None:
+            return None
+        fids = list(self.fidelity_probs.keys())
+        probs = list(self.fidelity_probs.values())
+        return self._rng.choice(fids, size=(n, 1), p=probs)
+
+
+# ---------------------------------------------------------------------------
+# Deterministic surrogate threshold sampling
+# ---------------------------------------------------------------------------
+
+
+class SurrogateThresholdCandidateGenerator(CandidateGenerator):
+    """Deterministic surrogate threshold sampling.
+
+    Draws a pool of random candidates, evaluates the surrogate, and keeps
+    those whose predicted mean exceeds ``threshold_value``.
+
+    Parameters:
+        domain:              ``InputDomain``.
+        sampler:             QMC sampler with ``.random(n)`` method.
+        surrogate:           Surrogate model instance.
+        threshold_value:     Deterministic threshold on predicted mean.
         pool_size:           Size of the initial random pool drawn each call.
         refit_surrogate:     Refit surrogate before predicting (default True).
         fidelity_probs:      Optional ``{fidelity: prob}`` for fidelity
@@ -253,24 +369,36 @@ class ThresholdCandidateGenerator(CandidateGenerator):
         if self.refit_surrogate:
             self.surrogate.fit(state)
 
-        x_all, _, _, mask = _probabilistic_threshold_filter(
-            domain=self.domain,
-            state=state,
-            sampler=self.sampler,
-            surrogate=self.surrogate,
-            pool_size=self.pool_size,
-            threshold_value=self.threshold_value,
-            target_fidelity=self.target_fidelity,
-            target_key=self.target_key,
-        )
+        x_unit = self.sampler.random(self.pool_size)
+        x_all = self.domain.inverse_transform(x_unit)
+
+        predictions = self.surrogate.predict(state, x_all)
+
+        if self.target_key is not None:
+            prediction = predictions[self.target_key]
+        elif self.target_fidelity is not None:
+            prediction = predictions[self.target_fidelity]
+        else:
+            if "mean" not in predictions.keys():
+                raise ValueError(
+                    "mean missing from predictions.keys(), did you miss target_fidelity or target_key inputs?"
+                )
+            prediction = predictions
+
+        mean = prediction["mean"].flatten()
+        mask = mean > self.threshold_value
 
         x_pass = x_all[mask]
+        mean_pass = mean[mask]
+
         if len(x_pass) == 0:
-            # Fallback: uniform random
             x_pass = self.domain.inverse_transform(self._rng.uniform(size=(n_candidates, self.domain.dim)))
-        elif len(x_pass) > n_candidates:
-            idx = self._rng.choice(len(x_pass), size=n_candidates, replace=False)
-            x_pass = x_pass[idx]
+        else:
+            # Sort by descending predicted mean (best first)
+            order = np.argsort(-mean_pass)
+            x_pass = x_pass[order]
+            if len(x_pass) > n_candidates:
+                x_pass = x_pass[:n_candidates]
 
         Ss = self._assign_fidelities(len(x_pass))
         return x_pass, Ss
@@ -284,12 +412,77 @@ class ThresholdCandidateGenerator(CandidateGenerator):
 
 
 # ---------------------------------------------------------------------------
-# Threshold sampling with exclusion
+# Greedy exclusion wrapper (composable)
+# ---------------------------------------------------------------------------
+
+
+class GreedyExclusionGenerator(CandidateGenerator):
+    """Composable wrapper that applies proximity-based exclusion.
+
+    Requests a larger pool of candidates from an inner generator, then
+    greedily selects well-spaced points using PCA-normalised distance.
+    Candidates are considered in the order returned by the inner generator,
+    so the inner generator controls priority (e.g.
+    ``ThresholdCandidateGenerator`` sorts by descending probability).
+
+    Compose with any base generator::
+
+        generator = GreedyExclusionGenerator(
+            inner=ThresholdCandidateGenerator(domain, sampler, surrogate, ...),
+            rejection_radius=0.5,
+        )
+
+    Parameters:
+        inner:               Another ``CandidateGenerator`` to draw from.
+        rejection_radius:    Minimum distance in PCA-normalised space.
+        pool_multiplier:     How many multiples of ``n_candidates`` to
+                             request from *inner* (default 4).
+        n_clusters:          Number of clusters for PCA analysis (default 1).
+    """
+
+    def __init__(
+        self,
+        inner: CandidateGenerator,
+        rejection_radius: float,
+        pool_multiplier: int = 4,
+        n_clusters: int = 1,
+    ):
+        super().__init__(inner.domain)
+        self.inner = inner
+        self.rejection_radius = rejection_radius
+        self.pool_multiplier = pool_multiplier
+        self.n_clusters = n_clusters
+
+    def generate(self, state, n_candidates):
+        pool_request = n_candidates * self.pool_multiplier
+        Xs, Ss = self.inner.generate(state, pool_request)
+
+        if len(Xs) == 0:
+            return Xs, Ss
+
+        if len(Xs) <= n_candidates:
+            return Xs, Ss
+
+        selected_idx = greedy_exclusion(Xs, n_candidates, self.rejection_radius, self.n_clusters)
+
+        if len(selected_idx) == 0:
+            return Xs[:n_candidates], Ss[:n_candidates] if Ss is not None else None
+
+        Xs_out = Xs[selected_idx]
+        Ss_out = Ss[selected_idx] if Ss is not None else None
+        return Xs_out, Ss_out
+
+
+# ---------------------------------------------------------------------------
+# Threshold sampling with exclusion (convenience)
 # ---------------------------------------------------------------------------
 
 
 class ThresholdExclusionGenerator(CandidateGenerator):
     """Probabilistic threshold sampling with proximity exclusion.
+
+    Equivalent to composing ``ThresholdCandidateGenerator`` inside
+    ``GreedyExclusionGenerator`` — provided as a convenience class.
 
     Like ``ThresholdCandidateGenerator`` but applies PCA-normalised
     distance-based rejection to avoid tightly clustered candidates.
@@ -341,7 +534,7 @@ class ThresholdExclusionGenerator(CandidateGenerator):
         if self.refit_surrogate:
             self.surrogate.fit(state)
 
-        x_all, y_pred, prob, mask = _probabilistic_threshold_filter(
+        x_all, y_pred, prob, mask = probabilistic_threshold_filter(
             domain=self.domain,
             state=state,
             sampler=self.sampler,
@@ -361,20 +554,16 @@ class ThresholdExclusionGenerator(CandidateGenerator):
             Ss = self._assign_fidelities(n_candidates)
             return Xs, Ss
 
-        # Apply proximity exclusion
-        x_selected, _, _ = _greedy_exclusion(
-            x_candidates,
-            y_pred[mask],
-            prob_candidates,
-            n_candidates,
-            self.rejection_radius,
-            self.n_clusters,
-        )
+        # Sort by descending probability then apply exclusion
+        order = np.argsort(-prob_candidates)
+        x_sorted = x_candidates[order]
 
-        if len(x_selected) == 0:
+        selected_idx = greedy_exclusion(x_sorted, n_candidates, self.rejection_radius, self.n_clusters)
+
+        if len(selected_idx) == 0:
             Xs = self.domain.inverse_transform(self._rng.uniform(size=(n_candidates, self.domain.dim)))
         else:
-            Xs = x_selected
+            Xs = x_sorted[selected_idx]
 
         Ss = self._assign_fidelities(len(Xs))
         return Xs, Ss
@@ -388,11 +577,11 @@ class ThresholdExclusionGenerator(CandidateGenerator):
 
 
 # ---------------------------------------------------------------------------
-# Shared helper functions (private)
+# Public helper functions
 # ---------------------------------------------------------------------------
 
 
-def _probabilistic_threshold_filter(
+def probabilistic_threshold_filter(
     domain,
     state,
     sampler,
@@ -402,11 +591,29 @@ def _probabilistic_threshold_filter(
     target_fidelity=None,
     target_key=None,
     random_draws=None,
+    min_probability=0.0,
 ):
     """Draw random candidates and compute probabilistic threshold mask.
 
-    Returns ``(x_all, y_pred, prob, mask)`` — same contract as the
-    top-level ``probabilistic_threshold_sampling`` in ``utils.py``.
+    Parameters:
+        domain:          ``InputDomain`` object.
+        state:           ``State`` object.
+        sampler:         QMC sampler with ``.random(n)`` method.
+        surrogate:       Surrogate model (must support ``predict(state, X)``).
+        pool_size:       Number of random candidates to draw.
+        threshold_value: Threshold value to compare against.
+        target_fidelity: int — selects surrogate fidelity.
+        target_key:      int or str — selects surrogate output.
+        random_draws:    Optional ``np.ndarray`` of shape ``(pool_size,)``
+                         with values in ``[0, 1]``.  If ``None``, draws are
+                         generated from ``[min_probability, 1]``.
+        min_probability: Lower bound for random draws (default 0.0).
+
+    Returns:
+        x_all:  All sampled input points ``(pool_size, dim)``.
+        y_pred: Predicted means ``(pool_size,)``.
+        prob:   Predicted ``P(y > threshold)`` for each point.
+        mask:   Boolean array of points that passed the stochastic filter.
     """
     x_unit = sampler.random(pool_size)
     x_all = domain.inverse_transform(x_unit)
@@ -427,24 +634,32 @@ def _probabilistic_threshold_filter(
     prob = 1.0 - norm.cdf(threshold_value, loc=mean, scale=std)
 
     if random_draws is None:
-        random_draws = np.random.rand(pool_size)
+        random_draws = min_probability + (1.0 - min_probability) * np.random.rand(pool_size)
     mask = prob > random_draws
 
     return x_all, mean, prob, mask
 
 
-def _greedy_exclusion(
+def greedy_exclusion(
     x_candidates,
-    y_candidates,
-    prob_candidates,
     batch_size,
     rejection_radius,
     n_clusters=1,
 ):
     """Greedy selection with PCA-normalised proximity exclusion.
 
-    Extracted from ``probabilistic_threshold_sampling_with_exclusion``
-    in ``utils.py`` so it can be shared.
+    Candidates are considered in the order given — the caller determines
+    priority.  Returns the *indices* into ``x_candidates`` of the
+    selected points.
+
+    Parameters:
+        x_candidates:     Input array ``(N, dim)``.
+        batch_size:       Maximum number of points to select.
+        rejection_radius: Minimum distance in PCA-normalised space.
+        n_clusters:       Number of clusters for PCA analysis (default 1).
+
+    Returns:
+        selected_indices: 1-D integer array of indices into *x_candidates*.
     """
     n_candidates, n_dims = x_candidates.shape
 
@@ -479,13 +694,11 @@ def _greedy_exclusion(
             eigenvalues = np.maximum(eigenvalues, 1e-10)
             x_normalised[cluster_mask] = x_centered @ eigenvectors / np.sqrt(eigenvalues)
 
-    # Greedy selection, highest probability first
-    sort_idx = np.argsort(-prob_candidates)
-
+    # Greedy selection in given order
     selected_indices = []
     selected_normalised_per_cluster = {k: [] for k in range(n_clusters_actual)}
 
-    for idx in sort_idx:
+    for idx in range(n_candidates):
         if len(selected_indices) >= batch_size:
             break
 
@@ -502,12 +715,4 @@ def _greedy_exclusion(
                 selected_indices.append(idx)
                 already_selected.append(x_norm_i)
 
-    if len(selected_indices) == 0:
-        return np.empty((0, n_dims)), np.empty(0), np.empty(0)
-
-    selected_indices = np.array(selected_indices)
-    return (
-        x_candidates[selected_indices],
-        y_candidates[selected_indices],
-        prob_candidates[selected_indices],
-    )
+    return np.array(selected_indices, dtype=int) if selected_indices else np.empty(0, dtype=int)

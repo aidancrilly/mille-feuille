@@ -3,6 +3,7 @@ import pytest
 import pytest_cases
 import torch
 from millefeuille.domain import FidelityDomain
+from millefeuille.generators import greedy_exclusion, probabilistic_threshold_filter
 from millefeuille.initialise import generate_initial_sample
 from millefeuille.state import State
 from millefeuille.surrogate import MultiFidelityGPSurrogate, SingleFidelityGPSurrogate
@@ -58,7 +59,7 @@ def multifidelitysample(ntrain):
 
 
 @pytest.mark.unit
-def test_singlefidelity_probabilistic_threshold_sampling(singlefidelitysample, initial_samples, threshold_value):
+def test_singlefidelity_probabilistic_threshold_filter(singlefidelitysample, initial_samples, threshold_value):
     Is, Xs, Ys = singlefidelitysample
 
     state = State(ForresterDomain, Is, Xs, Ys)
@@ -68,17 +69,17 @@ def test_singlefidelity_probabilistic_threshold_sampling(singlefidelitysample, i
 
     sampler = Uniform(ForresterDomain.dim)
 
-    x_all, y_pred, prob, mask = probabilistic_threshold_sampling(
+    x_all, y_pred, prob, mask = probabilistic_threshold_filter(
         ForresterDomain, state, sampler, surrogate, initial_samples, threshold_value
     )
     assert np.all(prob <= 1.0) and np.all(prob >= 0.0), (
-        "probabilistic_threshold_sampling returning impossible prob values"
+        "probabilistic_threshold_filter returning impossible prob values"
     )
 
 
 @pytest.mark.unit
 @pytest.mark.filterwarnings("ignore::UserWarning")
-def test_multifidelity_probabilistic_threshold_sampling(multifidelitysample, initial_samples, threshold_value):
+def test_multifidelity_probabilistic_threshold_filter(multifidelitysample, initial_samples, threshold_value):
     Is, Xs, Ss, Ys = multifidelitysample
 
     ForresterFidelity = FidelityDomain(num_fidelities=len(np.unique(Ss)))
@@ -91,16 +92,16 @@ def test_multifidelity_probabilistic_threshold_sampling(multifidelitysample, ini
     sampler = Uniform(ForresterDomain.dim)
 
     with pytest.raises(ValueError):
-        x_all, y_pred, prob, mask = probabilistic_threshold_sampling(
+        x_all, y_pred, prob, mask = probabilistic_threshold_filter(
             ForresterDomain, state, sampler, surrogate, initial_samples, threshold_value, target_fidelity=None
         )
 
     for fidelity in range(2):
-        x_all, y_pred, prob, mask = probabilistic_threshold_sampling(
+        x_all, y_pred, prob, mask = probabilistic_threshold_filter(
             ForresterDomain, state, sampler, surrogate, initial_samples, threshold_value, target_fidelity=fidelity
         )
         assert np.all(prob <= 1.0) and np.all(prob >= 0.0), (
-            "probabilistic_threshold_sampling returning impossible prob values"
+            "probabilistic_threshold_filter returning impossible prob values"
         )
 
 
@@ -115,7 +116,7 @@ def rejection_radius(request):
 
 
 @pytest.mark.unit
-def test_singlefidelity_probabilistic_threshold_sampling_with_exclusion(
+def test_singlefidelity_threshold_with_greedy_exclusion(
     singlefidelitysample, threshold_value, batch_size, rejection_radius
 ):
     Is, Xs, Ys = singlefidelitysample
@@ -129,27 +130,41 @@ def test_singlefidelity_probabilistic_threshold_sampling_with_exclusion(
 
     # Use a larger pool of candidates so the exclusion logic is exercised
     large_initial_samples = 50
-    x_sel, y_sel, prob_sel = probabilistic_threshold_sampling_with_exclusion(
-        ForresterDomain, state, sampler, surrogate, large_initial_samples, threshold_value, batch_size, rejection_radius
+    x_all, y_pred, prob, mask = probabilistic_threshold_filter(
+        ForresterDomain, state, sampler, surrogate, large_initial_samples, threshold_value
     )
+
+    x_candidates = x_all[mask]
+    prob_candidates = prob[mask]
+
+    if len(x_candidates) == 0:
+        pytest.skip("No candidates passed threshold")
+
+    # Sort by descending probability then apply exclusion
+    order = np.argsort(-prob_candidates)
+    x_sorted = x_candidates[order]
+    prob_sorted = prob_candidates[order]
+
+    selected_idx = greedy_exclusion(x_sorted, batch_size, rejection_radius)
+
+    x_sel = x_sorted[selected_idx]
+    prob_sel = prob_sorted[selected_idx]
 
     # Number of selected points must not exceed batch_size
     assert len(x_sel) <= batch_size, "More points returned than batch_size"
 
     # Probabilities must be in [0, 1]
     assert np.all(prob_sel <= 1.0) and np.all(prob_sel >= 0.0), (
-        "probabilistic_threshold_sampling_with_exclusion returning impossible prob values"
+        "greedy_exclusion returning impossible prob values"
     )
 
     # Shapes of returned arrays must be consistent
     assert x_sel.shape == (len(x_sel), ForresterDomain.dim)
-    assert y_sel.shape == (len(x_sel),)
-    assert prob_sel.shape == (len(x_sel),)
 
 
 @pytest.mark.unit
-def test_probabilistic_threshold_sampling_with_exclusion_empty(singlefidelitysample):
-    """When no candidates pass the threshold, empty arrays should be returned."""
+def test_threshold_with_greedy_exclusion_empty(singlefidelitysample):
+    """When no candidates pass the threshold, greedy_exclusion should not be reached."""
     Is, Xs, Ys = singlefidelitysample
 
     state = State(ForresterDomain, Is, Xs, Ys)
@@ -161,7 +176,46 @@ def test_probabilistic_threshold_sampling_with_exclusion_empty(singlefidelitysam
 
     # All draws are 1.0, so mask is always False (no candidate has prob > 1)
     random_draws = np.ones(4)
-    x_sel, y_sel, prob_sel = probabilistic_threshold_sampling_with_exclusion(
-        ForresterDomain, state, sampler, surrogate, 4, 0.5, 3, 0.5, random_draws=random_draws
+    x_all, y_pred, prob, mask = probabilistic_threshold_filter(
+        ForresterDomain, state, sampler, surrogate, 4, 0.5, random_draws=random_draws
     )
-    assert len(x_sel) == 0
+    assert mask.sum() == 0
+
+
+# ---------------------------------------------------------------------------
+# Tests for deprecated wrappers in utils (backwards compatibility)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_deprecated_probabilistic_threshold_sampling(singlefidelitysample, initial_samples, threshold_value):
+    Is, Xs, Ys = singlefidelitysample
+    state = State(ForresterDomain, Is, Xs, Ys)
+    surrogate = SingleFidelityGPSurrogate()
+    surrogate.fit(state)
+    sampler = Uniform(ForresterDomain.dim)
+
+    with pytest.warns(DeprecationWarning, match="probabilistic_threshold_sampling is deprecated"):
+        x_all, y_pred, prob, mask = probabilistic_threshold_sampling(
+            ForresterDomain, state, sampler, surrogate, initial_samples, threshold_value
+        )
+    assert np.all(prob <= 1.0) and np.all(prob >= 0.0)
+
+
+@pytest.mark.unit
+def test_deprecated_probabilistic_threshold_sampling_with_exclusion(
+    singlefidelitysample, threshold_value, batch_size, rejection_radius
+):
+    Is, Xs, Ys = singlefidelitysample
+    state = State(ForresterDomain, Is, Xs, Ys)
+    surrogate = SingleFidelityGPSurrogate()
+    surrogate.fit(state)
+    sampler = Uniform(ForresterDomain.dim)
+
+    with pytest.warns(DeprecationWarning, match="probabilistic_threshold_sampling_with_exclusion is deprecated"):
+        x_sel, y_sel, prob_sel = probabilistic_threshold_sampling_with_exclusion(
+            ForresterDomain, state, sampler, surrogate, 50, threshold_value, batch_size, rejection_radius
+        )
+    assert len(x_sel) <= batch_size
+    if len(x_sel) > 0:
+        assert np.all(prob_sel <= 1.0) and np.all(prob_sel >= 0.0)

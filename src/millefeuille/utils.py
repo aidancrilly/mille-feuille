@@ -1,15 +1,27 @@
-from .generators import (
-    BayesianOptimisationGenerator,
-    _greedy_exclusion,
-    _probabilistic_threshold_filter,
-)
+import warnings
+
+from .generators import BayesianOptimisationGenerator, greedy_exclusion, probabilistic_threshold_filter
 from .optimise import *
 from .simulator import *
 from .surrogate import BaseSurrogate
 
 """
-Defines some useful utility functions which do not fit into the defined classes
+Utility functions for running generate-evaluate loops.
+
+Candidate generation is handled by the generator classes in
+``millefeuille.generators``.  This module provides loop runners that
+pair any ``CandidateGenerator`` with a simulator.
+
+The standalone sampling functions (``probabilistic_threshold_sampling``,
+``surrogate_threshold_sampling``, ``probabilistic_threshold_sampling_with_exclusion``)
+are kept for backwards compatibility but are deprecated — use the generator
+classes in ``millefeuille.generators`` instead.
 """
+
+
+# ---------------------------------------------------------------------------
+# Deprecated standalone sampling helpers
+# ---------------------------------------------------------------------------
 
 
 def probabilistic_threshold_sampling(
@@ -24,28 +36,18 @@ def probabilistic_threshold_sampling(
     random_draws=None,
 ):
     """
-    Samples points using a GP surrogate and filters them probabilistically
-    based on the predicted probability of exceeding a threshold.
-
-    Parameters:
-        domain: InputDomain object
-        state: State object
-        sampler: QMC sampler (e.g. Sobol)
-        surrogate: mille-feuille-compatible surrogate (must support predict(domain, X))
-        initial_samples: number of samples to draw
-        threshold_value: threshold value to compare against
-        target_fidelity: int — selects surrogate fidelity
-        target_key: int or str — selects surrogate output
-        random_draws: optional np.ndarray of uniform(0,1) values of shape (initial_samples,)
-                      if None, will be generated internally
-
-    Returns:
-        x_all: all sampled input points (shape: NxD)
-        y_pred: np.ndarray of predicted means (selected column)
-        prob: predicted P(y > threshold) for each point
-        mask: boolean array of points that passed the stochastic filter
+    .. deprecated::
+        Use :func:`millefeuille.generators.probabilistic_threshold_filter`
+        or :class:`millefeuille.generators.ThresholdCandidateGenerator` instead.
     """
-    return _probabilistic_threshold_filter(
+    warnings.warn(
+        "probabilistic_threshold_sampling is deprecated — use "
+        "millefeuille.generators.probabilistic_threshold_filter or "
+        "ThresholdCandidateGenerator instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return probabilistic_threshold_filter(
         domain=domain,
         state=state,
         sampler=sampler,
@@ -62,29 +64,19 @@ def surrogate_threshold_sampling(
     domain, state, sampler, surrogate, initial_samples, surrogate_threshold, target_fidelity=None, target_key=None
 ):
     """
-    Draws samples from the sampler, evaluates the surrogate model,
-    and selects those above a specified threshold.
-
-    Parameters:
-        domain: InputDomain object
-        state: State object
-        sampler: QMC sampler (e.g., Sobol)
-        surrogate: mille-feuille-style surrogate with .predict(domain, Xs) method
-        initial_samples: int, number of candidate points
-        surrogate_threshold: float, threshold to apply on predicted mean
-        target_fidelity: int — selects surrogate fidelity
-        target_key: int or str — selects surrogate output
-
-    Returns:
-        x_all: np.ndarray of all candidate input samples
-        y_pred: np.ndarray of predicted means (selected column)
-        mask: np.ndarray of boolean values where prediction > threshold
+    .. deprecated::
+        Use :class:`millefeuille.generators.SurrogateThresholdCandidateGenerator`
+        instead.
     """
-    # Draw samples in unit hypercube, transform to input space
+    warnings.warn(
+        "surrogate_threshold_sampling is deprecated — use "
+        "SurrogateThresholdCandidateGenerator instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     x_unit = sampler.random(initial_samples)
     x_all = domain.inverse_transform(x_unit)
 
-    # Predict mean and std from GP
     predictions = surrogate.predict(state, x_all)
 
     if target_key is not None:
@@ -100,7 +92,6 @@ def surrogate_threshold_sampling(
             prediction = predictions
 
     mean = prediction["mean"]
-
     y_pred = mean
     mask = mean > surrogate_threshold
 
@@ -122,37 +113,21 @@ def probabilistic_threshold_sampling_with_exclusion(
     random_draws=None,
 ):
     """
-    Samples points using a GP surrogate with probabilistic threshold filtering
-    and proximity-based exclusion to prevent closely-clustered sample points.
-
-    A large number of random sample points are drawn and filtered by the
-    probabilistic threshold criterion. The remaining candidates are analysed
-    for clusters; within each cluster, coordinates are rescaled via PCA to
-    an uncorrelated unit-variance space. Points are then greedily selected
-    up to batch_size, rejecting any candidate whose normalised distance to an
-    already-selected point is less than rejection_radius.
-
-    Parameters:
-        domain: InputDomain object
-        state: State object
-        sampler: QMC sampler (e.g. Sobol)
-        surrogate: mille-feuille-compatible surrogate (must support predict(domain, X))
-        initial_samples: number of initial random candidates to draw
-        threshold_value: threshold value for the probabilistic filter
-        batch_size: maximum number of points to return
-        rejection_radius: minimum distance in PCA-normalised space between selected points
-        n_clusters: number of clusters used for PCA analysis (default: 1)
-        target_fidelity: int — selects surrogate fidelity
-        target_key: int or str — selects surrogate output
-        random_draws: optional np.ndarray of uniform(0,1) values of shape (initial_samples,)
-                      if None, will be generated internally
-
-    Returns:
-        x_selected: selected input points (shape: K x D, K <= batch_size)
-        y_selected: predicted means at selected points (shape: K,)
-        prob_selected: predicted P(y > threshold) at selected points (shape: K,)
+    .. deprecated::
+        Use :class:`millefeuille.generators.ThresholdExclusionGenerator` or
+        compose :class:`~millefeuille.generators.ThresholdCandidateGenerator`
+        with :class:`~millefeuille.generators.GreedyExclusionGenerator` instead.
     """
-    x_all, y_pred, prob, mask = _probabilistic_threshold_filter(
+    warnings.warn(
+        "probabilistic_threshold_sampling_with_exclusion is deprecated — use "
+        "ThresholdExclusionGenerator or compose ThresholdCandidateGenerator "
+        "with GreedyExclusionGenerator instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    import numpy as np
+
+    x_all, y_pred, prob, mask = probabilistic_threshold_filter(
         domain=domain,
         state=state,
         sampler=sampler,
@@ -171,14 +146,23 @@ def probabilistic_threshold_sampling_with_exclusion(
     if len(x_candidates) == 0:
         return x_candidates, y_candidates, prob_candidates
 
-    return _greedy_exclusion(
-        x_candidates,
-        y_candidates,
-        prob_candidates,
-        batch_size,
-        rejection_radius,
-        n_clusters,
-    )
+    # Sort by descending probability then apply exclusion
+    order = np.argsort(-prob_candidates)
+    x_sorted = x_candidates[order]
+    y_sorted = y_candidates[order]
+    prob_sorted = prob_candidates[order]
+
+    selected_idx = greedy_exclusion(x_sorted, batch_size, rejection_radius, n_clusters)
+
+    if len(selected_idx) == 0:
+        return np.empty((0, x_all.shape[1])), np.empty(0), np.empty(0)
+
+    return x_sorted[selected_idx], y_sorted[selected_idx], prob_sorted[selected_idx]
+
+
+# ---------------------------------------------------------------------------
+# Loop runners
+# ---------------------------------------------------------------------------
 
 
 def run_Bayesian_optimiser(

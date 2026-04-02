@@ -4,7 +4,7 @@ from Scheduler import PBSMPIScheduler, get_PBS_hosts
 from Simulator import Simulator
 
 # Import utils (N.B. local utils file, not millefeuille.utils)
-from Utils import Uniform, get_training_data, read_domainfile
+from Utils import get_training_data, read_domainfile
 
 EXECUTABLE = "path_to_your_executable"
 
@@ -45,68 +45,37 @@ if __name__ == "__main__":
     scheduler = PBSMPIScheduler(output_dir, hosts)
 
     # Active learning parameters
-    import sys
-
-    # Super batch number from command line argument
-    if len(sys.argv) < 2:
-        array_job_num = 0
-    else:
-        array_job_num = int(sys.argv[-1])
-    # Number of learning runs
     Nlearningruns = 128
-    # Initial samples for adaptive sampling
-    initial_samples = 64
-    # Probability limit for adaptive sampling
-    prob_lim = 0.25
-    # Surrogate threshold for adaptive sampling
     surrogate_threshold = 0.9 * state.best_value
-    # Whether to update threshold after each run
-    update_threshold = False
-    # Retrain surrogate model after N new samples
-    retrain_surrogate_num = 4
+    pool_size = 256
+    prob_lim = 0.25
+
     # Sampler for adaptive sampling
+    from Utils import Uniform
+
     sampler = Uniform(domain.dim)
 
-    # Starting index for this batch
-    current_iter = np.amax(Is) + array_job_num * Nlearningruns * Nbatch
-    # Main loop for learning runs
-    for i in range(Nlearningruns):
-        # Train surrogate
-        if i * Nbatch % retrain_surrogate_num == 0:
-            print("Fitting surrogate...")
-            surrogate.fit(state)
-            print("Surrogate fit!")
+    # ---- Build a composable generator ----
+    # ThresholdCandidateGenerator draws a pool, predicts with the surrogate,
+    # and filters probabilistically.  min_probability biases draws so that
+    # only high-confidence candidates pass the filter.
+    generator = mf.ThresholdCandidateGenerator(
+        domain=domain,
+        sampler=sampler,
+        surrogate=surrogate,
+        threshold_value=surrogate_threshold,
+        pool_size=pool_size,
+        refit_surrogate=True,
+        min_probability=prob_lim,
+    )
 
-        # Adaptive sampling
-        sum_mask = 0
-        initial_samples = initial_samples // 2
-        while sum_mask < Nbatch:
-            initial_samples *= 2
-            random_draws = prob_lim + (1 - prob_lim) * np.random.rand(initial_samples)
-            x_all, y_pred, prob, mask = mf.probabilistic_threshold_sampling(
-                domain,
-                state,
-                sampler,
-                surrogate,
-                initial_samples,
-                surrogate_threshold,
-                random_draws=random_draws,
-            )
-            sum_mask = mask.sum()
-
-        # Select Nbatch from masked x
-        X_mask = x_all[mask, :]
-        X_next = X_mask[np.random.choice(X_mask.shape[0], size=Nbatch, replace=False), :]
-        index_next = current_iter + np.arange(Nbatch) + 1
-
-        # Run batches of simulator
-        P_next, Y_next = batched_simulator(index_next, X_next, scheduler)
-
-        state.update(index_next, X_next, Y_next, P_next=P_next)
-
-        if update_threshold:
-            surrogate_threshold = 0.9 * state.best_value
-
-        current_iter += Nbatch
-
-        state.to_csv(output_file)
+    # Run the generate-evaluate loop
+    state = mf.run_generator_loop(
+        Nsamples=Nlearningruns,
+        batch_size=Nbatch,
+        generate_candidates=generator,
+        state=state,
+        simulator=batched_simulator,
+        scheduler=scheduler,
+        csv_name=output_file,
+    )

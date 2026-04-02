@@ -7,7 +7,6 @@
 `mille‑feuille` acts as an orchestrator when running sampling, learning and optimisation loops against expensive MPI-parallelised HPC codes. For optimisation, `mille‑feuille` is a thin wrapper on top of [**BoTorch**](https://botorch.org/), providing the necessary interface between simulators, surrogates and optimisers.
 
 > **Status:** early days – very much a work in progress.
-> Preliminary **asynchronous scheduling** support is available — see the [async_scheduling example](examples/async_scheduling/).
 
 Used in the following publications:
 
@@ -68,7 +67,30 @@ These classes hold the necessary information to train surrogate models. `mille�
 
 Take a look at the examples and the tests to see implementations of Simulators and Schedulers.
 
----
+> Preliminary **asynchronous scheduling** support is available — see the [async_scheduling example](examples/async_scheduling/).
+
+### Candidate Generators
+
+`mille‑feuille` provides an interchangable system of **candidate generators** that produce the next batch of inputs to evaluate.  Every generator implements the same `CandidateGenerator` interface and returns `(indices, Xs, Ss)`, so they can be plugged into `run_generator_loop` or the async scheduler interchangeably.
+
+#### Base generators
+
+Base generators produce candidates from scratch:
+
+| Generator | Strategy |
+|---|---|
+| `RandomCandidateGenerator` | Uniform / QMC sampling over the input domain |
+| `BayesianOptimisationGenerator` | Surrogate + acquisition-function optimisation |
+| `ThresholdCandidateGenerator` | Probabilistic threshold sampling (draws pool → surrogate prediction → stochastic filter) |
+| `SurrogateThresholdCandidateGenerator` | Deterministic surrogate threshold sampling (predicted mean > threshold) |
+
+#### Wrapper generators
+
+Wrapper generators take another generator as input and refine its output:
+
+| Generator | Effect |
+|---|---|
+| `GreedyExclusionGenerator` | PCA-normalised proximity-based exclusion to avoid clustered candidates.
 
 ## Additional Info
 
