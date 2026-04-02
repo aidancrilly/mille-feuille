@@ -87,28 +87,76 @@ def test_transform_feature(dim, b_low, b_up):
 
 
 @pytest.mark.unit
-def test_scale_factor_domain_continuous(nsample, dim, b_low, b_up):
-    """Scale factor applied to continuous dims: check output range and scaling."""
+def test_scale_factor_inverse_transform(nsample, dim, b_low, b_up):
+    """inverse_transform maps unit hypercube to physical space with scale factor coupling."""
     domain = ScaleFactorInputDomain(dim=dim, b_low=b_low, b_up=b_up, steps=np.zeros_like(b_low))
 
     X_unit = np.random.rand(nsample, dim)
     X_real = domain.inverse_transform(X_unit)
 
-    # Dimension 0 is the scale factor; recover it
-    scale_factor_real = (b_up[0] - b_low[0]) * X_unit[:, 0] + b_low[0]
-    assert np.allclose(X_real[:, 0], scale_factor_real)
+    # Dimension 0 is the scale factor — should be a simple linear map
+    scale_factor = (b_up[0] - b_low[0]) * X_unit[:, 0] + b_low[0]
+    assert np.allclose(X_real[:, 0], scale_factor)
 
-    # Dimensions 1..N should equal (physical value) * scale_factor
+    # Dimensions 1..N should be (unscaled physical value) * scale_factor
     for n in range(1, dim):
-        expected = ((b_up[n] - b_low[n]) * X_unit[:, n] + b_low[n]) * scale_factor_real
-        assert np.allclose(X_real[:, n], expected)
+        unscaled = (b_up[n] - b_low[n]) * X_unit[:, n] + b_low[n]
+        assert np.allclose(X_real[:, n], unscaled * scale_factor)
 
 
 @pytest.mark.unit
-def test_scale_factor_domain_discrete(nsample, dim, b_low, b_up):
-    """Scale factor applied before snapping: discrete dims should lie on their grids."""
+def test_scale_factor_roundtrip(nsample, dim, b_low, b_up):
+    """transform(inverse_transform(X)) should recover the original unit-cube points."""
+    domain = ScaleFactorInputDomain(dim=dim, b_low=b_low, b_up=b_up, steps=np.zeros_like(b_low))
+
+    X_unit = np.random.rand(nsample, dim)
+    X_real = domain.inverse_transform(X_unit)
+    X_recovered = domain.transform(X_real)
+
+    assert np.allclose(X_recovered, X_unit)
+
+
+@pytest.mark.unit
+def test_scale_factor_transform_undoes_coupling(nsample, dim, b_low, b_up):
+    """transform should divide dims 1..N by the scale factor before normalising."""
+    domain = ScaleFactorInputDomain(dim=dim, b_low=b_low, b_up=b_up, steps=np.zeros_like(b_low))
+    base_domain = InputDomain(dim=dim, b_low=b_low, b_up=b_up, steps=np.zeros_like(b_low))
+
+    # Build a physical-space array where dims 1..N include the scale factor
+    X_unit = np.random.rand(nsample, dim)
+    X_real = domain.inverse_transform(X_unit)
+
+    # After ScaleFactorInputDomain.transform undoes the coupling, the result
+    # should differ from the base InputDomain.transform (unless scale factor == 1)
+    X_sf = domain.transform(X_real)
+    X_base = base_domain.transform(X_real)
+
+    # Dim 0 should be identical in both
+    assert np.allclose(X_sf[:, 0], X_base[:, 0])
+
+    # Dims 1..N should generally differ (scale factor is not 1 for random bounds)
+    # but the scale-factor version should recover the original unit-cube values
+    assert np.allclose(X_sf, X_unit)
+
+
+@pytest.mark.unit
+def test_scale_factor_feature_roundtrip(dim, b_low, b_up):
+    """Per-feature transform/inverse_transform with explicit scale_factor argument."""
+    domain = ScaleFactorInputDomain(dim=dim, b_low=b_low, b_up=b_up, steps=np.zeros_like(b_low))
+
+    sf_physical = 0.5 * (b_low[0] + b_up[0])  # pick a concrete scale factor value
+
+    for n in range(dim):
+        for unit_val in [0.0, 0.25, 0.5, 0.75, 1.0]:
+            real_val = domain.inverse_transform_feature(n, unit_val, scale_factor=sf_physical if n > 0 else None)
+            recovered = domain.transform_feature(n, real_val, scale_factor=sf_physical if n > 0 else None)
+            assert np.isclose(recovered, unit_val), f"Round-trip failed for dim {n}, unit_val {unit_val}"
+
+
+@pytest.mark.unit
+def test_scale_factor_discrete_snapping(nsample, dim, b_low, b_up):
+    """Discrete dims should snap to their grids after the scale factor is applied."""
     steps = np.zeros_like(b_low)
-    # Make all dimensions except dim 0 discrete
     for i in range(1, dim):
         steps[i] = (b_up[i] - b_low[i]) / 10.0
 
@@ -117,21 +165,7 @@ def test_scale_factor_domain_discrete(nsample, dim, b_low, b_up):
     X_unit = np.random.rand(nsample, dim)
     X_real = domain.inverse_transform(X_unit)
 
-    scale_factor_real = (b_up[0] - b_low[0]) * X_unit[:, 0] + b_low[0]
-    assert np.allclose(X_real[:, 0], scale_factor_real)
-
     # Discrete dimensions must be multiples of their step size
     for n in domain.discrete_indices:
-        assert np.allclose(X_real[:, n] / steps[n], np.rint(X_real[:, n] / steps[n])), (
-            f"Discrete dim {n} values not on grid"
-        )
-
-
-@pytest.mark.unit
-def test_scale_factor_domain_inherits_transform(nsample, dim, b_low, b_up):
-    """transform() should behave identically to InputDomain.transform()."""
-    domain_sf = ScaleFactorInputDomain(dim=dim, b_low=b_low, b_up=b_up, steps=np.zeros_like(b_low))
-    domain_base = InputDomain(dim=dim, b_low=b_low, b_up=b_up, steps=np.zeros_like(b_low))
-
-    X = b_low[None, :] + (b_up[None, :] - b_low[None, :]) * np.random.rand(nsample, dim)
-    assert np.allclose(domain_sf.transform(X), domain_base.transform(X))
+        remainder = np.abs(X_real[:, n] / steps[n] - np.rint(X_real[:, n] / steps[n]))
+        assert np.allclose(remainder, 0.0), f"Discrete dim {n} values not on grid"

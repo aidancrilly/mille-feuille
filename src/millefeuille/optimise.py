@@ -2,6 +2,7 @@ import time
 
 from botorch.optim import optimize_acqf, optimize_acqf_mixed
 
+from .domain import ScaleFactorInputDomain
 from .state import State
 
 DEFAULT_NUM_RESTARTS = 10
@@ -42,6 +43,11 @@ def generate_batch(
         # Transform fixed_features values from real units to normalised [0, 1] units
         normalised_fixed_features = None
         if fixed_features is not None:
+            if isinstance(state.input_domain, ScaleFactorInputDomain):
+                raise ValueError(
+                    "fixed_features is not supported with ScaleFactorInputDomain "
+                    "because transform_feature cannot account for the scale factor coupling."
+                )
             normalised_fixed_features = {
                 idx: state.input_domain.transform_feature(idx, val) for idx, val in fixed_features.items()
             }
