@@ -1,30 +1,11 @@
 import warnings
 
 from .generators import BayesianOptimisationGenerator, greedy_exclusion, probabilistic_threshold_filter
-import warnings
-
-from .generators import BayesianOptimisationGenerator, greedy_exclusion, probabilistic_threshold_filter
 from .optimise import *
 from .simulator import *
 from .surrogate import BaseSurrogate
 
 """
-Utility functions for running generate-evaluate loops.
-
-Candidate generation is handled by the generator classes in
-``millefeuille.generators``.  This module provides loop runners that
-pair any ``CandidateGenerator`` with a simulator.
-
-The standalone sampling functions (``probabilistic_threshold_sampling``,
-``surrogate_threshold_sampling``, ``probabilistic_threshold_sampling_with_exclusion``)
-are kept for backwards compatibility but are deprecated — use the generator
-classes in ``millefeuille.generators`` instead.
-"""
-
-
-# ---------------------------------------------------------------------------
-# Deprecated standalone sampling helpers
-# ---------------------------------------------------------------------------
 Utility functions for running generate-evaluate loops.
 
 Candidate generation is handled by the generator classes in
@@ -55,18 +36,6 @@ def probabilistic_threshold_sampling(
     random_draws=None,
 ):
     """
-    .. deprecated::
-        Use :func:`millefeuille.generators.probabilistic_threshold_filter`
-        or :class:`millefeuille.generators.ThresholdCandidateGenerator` instead.
-    """
-    warnings.warn(
-        "probabilistic_threshold_sampling is deprecated — use "
-        "millefeuille.generators.probabilistic_threshold_filter or "
-        "ThresholdCandidateGenerator instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return probabilistic_threshold_filter(
     .. deprecated::
         Use :func:`millefeuille.generators.probabilistic_threshold_filter`
         or :class:`millefeuille.generators.ThresholdCandidateGenerator` instead.
@@ -158,21 +127,6 @@ def probabilistic_threshold_sampling_with_exclusion(
     import numpy as np
 
     x_all, y_pred, prob, mask = probabilistic_threshold_filter(
-    .. deprecated::
-        Use :class:`millefeuille.generators.ThresholdExclusionGenerator` or
-        compose :class:`~millefeuille.generators.ThresholdCandidateGenerator`
-        with :class:`~millefeuille.generators.GreedyExclusionGenerator` instead.
-    """
-    warnings.warn(
-        "probabilistic_threshold_sampling_with_exclusion is deprecated — use "
-        "ThresholdExclusionGenerator or compose ThresholdCandidateGenerator "
-        "with GreedyExclusionGenerator instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    import numpy as np
-
-    x_all, y_pred, prob, mask = probabilistic_threshold_filter(
         domain=domain,
         state=state,
         sampler=sampler,
@@ -191,23 +145,6 @@ def probabilistic_threshold_sampling_with_exclusion(
     if len(x_candidates) == 0:
         return x_candidates, y_candidates, prob_candidates
 
-    # Sort by descending probability then apply exclusion
-    order = np.argsort(-prob_candidates)
-    x_sorted = x_candidates[order]
-    y_sorted = y_candidates[order]
-    prob_sorted = prob_candidates[order]
-
-    selected_idx = greedy_exclusion(x_sorted, batch_size, rejection_radius, n_clusters)
-
-    if len(selected_idx) == 0:
-        return np.empty((0, x_all.shape[1])), np.empty(0), np.empty(0)
-
-    return x_sorted[selected_idx], y_sorted[selected_idx], prob_sorted[selected_idx]
-
-
-# ---------------------------------------------------------------------------
-# Loop runners
-# ---------------------------------------------------------------------------
     # Sort by descending probability then apply exclusion
     order = np.argsort(-prob_candidates)
     x_sorted = x_candidates[order]
