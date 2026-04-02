@@ -31,7 +31,7 @@ Usage:
 
 from millefeuille.asynch import run_async_loop
 from millefeuille.domain import InputDomain
-from millefeuille.generators import CandidateGenerator, _probabilistic_threshold_filter
+from millefeuille.generators import CandidateGenerator, probabilistic_threshold_filter
 from millefeuille.simulator import ResourceManager
 from millefeuille.state import State
 from millefeuille.surrogate import RandomForestEnsembleModel
@@ -51,7 +51,7 @@ class RandomThenThresholdCandidateGenerator(CandidateGenerator):
     For the first *n_randomsamples* evaluations, points are drawn from a
     Sobol quasi-random sequence.  Once enough data has been collected the
     generator trains the provided surrogate and uses
-    ``_probabilistic_threshold_filter`` to bias sampling toward regions
+    ``probabilistic_threshold_filter`` to bias sampling toward regions
     that are predicted to exceed a performance threshold.
 
     Parameters:
@@ -76,7 +76,7 @@ class RandomThenThresholdCandidateGenerator(CandidateGenerator):
         else:
             # Surrogate-guided threshold phase
             threshold_value = 0.1
-            Xs, _, _ = _probabilistic_threshold_filter(
+            Xs, _, _ = probabilistic_threshold_filter(
                 self.domain,
                 state,
                 self.sampler,

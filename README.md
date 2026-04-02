@@ -67,7 +67,63 @@ These classes hold the necessary information to train surrogate models. `mille�
 4. (Optionally) A clean up of the Simulator and Schedular output files is performed
 
 Take a look at the examples and the tests to see implementations of Simulators and Schedulers.
+### Candidate Generators
 
+`mille‑feuille` provides a composable system of **candidate generators** that produce the next batch of inputs to evaluate.  Every generator implements the same `CandidateGenerator` interface and returns `(indices, Xs, Ss)`, so they can be plugged into `run_generator_loop` or the async scheduler interchangeably.
+
+#### Base generators
+
+Base generators produce candidates from scratch:
+
+| Generator | Strategy |
+|---|---|
+| `RandomCandidateGenerator` | Uniform / QMC sampling over the input domain |
+| `BayesianOptimisationGenerator` | Surrogate + acquisition-function optimisation |
+| `ThresholdCandidateGenerator` | Probabilistic threshold sampling (draws pool → surrogate prediction → stochastic filter) |
+| `SurrogateThresholdCandidateGenerator` | Deterministic surrogate threshold sampling (predicted mean > threshold) |
+
+#### Wrapper generators
+
+Wrapper generators take another generator as input and refine its output:
+
+| Generator | Effect |
+|---|---|
+| `GreedyExclusionGenerator` | PCA-normalised proximity-based exclusion to avoid clustered candidates |
+
+#### Composing generators
+
+Because every generator shares the same interface, they snap together like building blocks:
+
+```python
+import millefeuille as mf
+
+# 1. Base: probabilistic threshold sampling
+base = mf.ThresholdCandidateGenerator(
+    domain=domain,
+    sampler=sampler,
+    surrogate=surrogate,
+    threshold_value=0.5,
+    pool_size=512,
+)
+
+# 2. Wrap with proximity exclusion
+generator = mf.GreedyExclusionGenerator(
+    inner=base,
+    rejection_radius=0.3,
+)
+
+# 3. Drop into the standard loop
+state = mf.run_generator_loop(
+    Nsamples=100,
+    batch_size=4,
+    generate_candidates=generator,
+    state=state,
+    simulator=simulator,
+    scheduler=scheduler,
+)
+```
+
+You can write your own generators by subclassing `CandidateGenerator` and implementing `generate(state, n_candidates)` — the base class handles index assignment automatically.
 ---
 
 ## Additional Info

@@ -23,7 +23,7 @@ if __name__ == "__main__":
     }
     io_params = {}
 
-    domain = read_domainfile(domain_file)
+    domain, X_names = read_domainfile(domain_file)
     # Read the output file to get training data
     Is, Xs, Ys, Ps, X_names, Y_names, P_names = get_training_data(training_file, domain.dim)
 
@@ -50,6 +50,21 @@ if __name__ == "__main__":
         acq_function = qLogExpectedImprovement(surrogate.model, best_f=state.best_value_transformed)
         return acq_function
 
-    mf.run_Bayesian_optimiser(
-        Nsamples, Nbatch, generate_LEI_acq, state, surrogate, batched_simulator, scheduler, csv_name=output_file
+    # ---- Build a Bayesian optimisation generator ----
+    generator = mf.BayesianOptimisationGenerator(
+        domain=domain,
+        surrogate=surrogate,
+        generate_acq_fn=generate_LEI_acq,
+        refit_surrogate=True,
+    )
+
+    # Run the generate-evaluate loop
+    state = mf.run_generator_loop(
+        Nsamples=Nsamples,
+        batch_size=Nbatch,
+        generate_candidates=generator,
+        state=state,
+        simulator=batched_simulator,
+        scheduler=scheduler,
+        csv_name=output_file,
     )
