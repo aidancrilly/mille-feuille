@@ -4,6 +4,7 @@ import pytest_cases
 import torch
 from millefeuille.domain import FidelityDomain
 from millefeuille.generators import greedy_exclusion, probabilistic_threshold_filter
+from millefeuille.generators import greedy_exclusion, probabilistic_threshold_filter
 from millefeuille.initialise import generate_initial_sample
 from millefeuille.state import State
 from millefeuille.surrogate import MultiFidelityGPSurrogate, SingleFidelityGPSurrogate
