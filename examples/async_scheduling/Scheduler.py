@@ -56,7 +56,7 @@ class MPIScheduler(Scheduler):
         processes = []
         file_handles = []
 
-        for index, input_path in zip(indices, inputs):
+        for index, input_path in zip(indices, inputs, strict=True):
             output_file = os.path.join(self.output_dir, f"Simulator_output_{index}.txt")
             error_file = os.path.join(self.output_dir, f"Simulator_error_{index}.txt")
 
@@ -65,14 +65,14 @@ class MPIScheduler(Scheduler):
             file_handles.append((out, err))
 
             # Single-node launch: no host files needed
-            exe_cmd = [self._mpiexec, "-n", str(nproc), exe] + input_path.split()
+            exe_cmd = [self._mpiexec, "-n", str(nproc), exe, *input_path.split()]
 
             print(f"[{threading.current_thread().name}] Launching: {' '.join(exe_cmd)}")
             proc = subprocess.Popen(exe_cmd, stdout=out, stderr=err)
             processes.append(proc)
 
         # Wait for all processes in this batch to complete
-        for proc, (out, err) in zip(processes, file_handles):
+        for proc, (out, err) in zip(processes, file_handles, strict=True):
             rc = proc.wait()
             print(f"[{threading.current_thread().name}] pid={proc.pid} finished rc={rc}")
             out.close()
