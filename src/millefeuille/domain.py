@@ -177,6 +177,27 @@ class ScaleFactorInputDomain(InputDomain):
         (inherits all attributes from InputDomain)
     """
 
+    def transform(self, X):
+        """Transform a batch of points from real units (with scale factor) to [0, 1]^d.
+
+        Undoes the multiplicative scale factor on dimensions 1..N by dividing by the
+        physical value of dimension 0, then normalizes every dimension to [0, 1].
+
+        Parameters:
+            X (np.ndarray): Points in real units (scale factor already applied),
+                shape (n_points, dim).
+
+        Returns:
+            np.ndarray: Points in normalized [0, 1]^d units, shape (n_points, dim).
+        """
+        X_scaled = X.copy()
+        # Undo the multiplicative scale factor from dimensions 1..N
+        X_scaled[:, 1:] = X_scaled[:, 1:] / X_scaled[:, 0:1]
+        # Normalize each dimension to [0, 1]
+        for n in range(self.dim):
+            X_scaled[:, n] = super().transform_feature(n, X_scaled[:, n])
+        return X_scaled
+
     def inverse_transform(self, X):
         """Transform from normalized [0, 1]^d to real units with scale factor applied.
 
@@ -190,14 +211,66 @@ class ScaleFactorInputDomain(InputDomain):
         Returns:
             np.ndarray: Points in real units with scale factor applied, shape (n_points, dim).
         """
+        X_scaled = X.copy()
         # Convert all dimensions to physical coordinates (without discrete snapping yet)
-        X_scaled = (self.b_up - self.b_low) * X + self.b_low
+        for n in range(self.dim):
+            X_scaled[:, n] = (self.b_up[n] - self.b_low[n]) * X[:, n] + self.b_low[n]
         # Apply scale factor (dim 0) multiplicatively to dimensions 1..N
         X_scaled[:, 1:] *= X_scaled[:, 0:1]
         # Snap discrete dimensions to their grids
         for n in self.discrete_indices:
             X_scaled[:, n] = np.rint(X_scaled[:, n] / self.steps[n]) * self.steps[n]
         return X_scaled
+
+    def transform_feature(self, feature_index, value, scale_factor=None):
+        """Transform a feature value from real units to normalized [0, 1].
+
+        For dimension 0 (the scale factor itself) the transform is the standard
+        linear normalization.  For dimensions 1..N, if *scale_factor* is supplied
+        the value is first divided by it to undo the multiplicative coupling before
+        normalization.
+
+        Parameters:
+            feature_index (int): Index of the feature dimension.
+            value (float or np.ndarray): Feature value(s) in real units.
+            scale_factor (float or np.ndarray or None): Physical scale factor
+                value(s) used to undo the multiplicative scaling for features > 0.
+                Ignored for feature 0.
+
+        Returns:
+            float or np.ndarray: Normalized value(s) in [0, 1].
+        """
+        if feature_index > 0 and scale_factor is not None:
+            value = value / scale_factor
+        return super().transform_feature(feature_index, value)
+
+    def inverse_transform_feature(self, feature_index, value, scale_factor=None):
+        """Transform a feature value from normalized [0, 1] to real units.
+
+        The value is first denormalized to the physical range.  For dimensions
+        1..N, if *scale_factor* is supplied the denormalized value is multiplied
+        by it to apply the multiplicative coupling.  Discrete dimensions are then
+        snapped to their grid.
+
+        Parameters:
+            feature_index (int): Index of the feature dimension.
+            value (float or np.ndarray): Normalized feature value(s) in [0, 1].
+            scale_factor (float or np.ndarray or None): Physical scale factor
+                value(s) to apply multiplicatively for features > 0.
+                Ignored for feature 0.
+
+        Returns:
+            float or np.ndarray: Feature value(s) in real units.
+        """
+        # Denormalize from [0, 1] to the unscaled physical range
+        value = (self.b_up[feature_index] - self.b_low[feature_index]) * value + self.b_low[feature_index]
+        # Apply the multiplicative scale factor for features > 0
+        if feature_index > 0 and scale_factor is not None:
+            value = value * scale_factor
+        # Snap discrete dimensions to their grid
+        if feature_index in self.discrete_indices:
+            value = np.rint(value / self.steps[feature_index]) * self.steps[feature_index]
+        return value
 
 
 @dataclass
