@@ -163,6 +163,44 @@ class InputDomain:
 
 
 @dataclass
+class ScaleFactorInputDomain(InputDomain):
+    """Defines an input domain where the first dimension is a multiplicative scale factor.
+
+    Inherits from ``InputDomain``. The first dimension (index 0) represents a scale factor
+    that is applied multiplicatively to all other dimensions after converting to physical
+    coordinates but before snapping to discrete steps.
+
+    This is useful when one parameter controls the overall magnitude of the remaining
+    parameters (e.g., a total energy or amplitude that scales all other quantities).
+
+    Attributes:
+        (inherits all attributes from InputDomain)
+    """
+
+    def inverse_transform(self, X):
+        """Transform from normalized [0, 1]^d to real units with scale factor applied.
+
+        Converts all dimensions to physical coordinates, multiplies dimensions 1 to
+        ``dim-1`` by the physical value of dimension 0 (the scale factor), then snaps
+        any discrete dimensions to their grids.
+
+        Parameters:
+            X (np.ndarray): Points in normalized [0, 1]^d units, shape (n_points, dim).
+
+        Returns:
+            np.ndarray: Points in real units with scale factor applied, shape (n_points, dim).
+        """
+        # Convert all dimensions to physical coordinates (without discrete snapping yet)
+        X_scaled = (self.b_up - self.b_low) * X + self.b_low
+        # Apply scale factor (dim 0) multiplicatively to dimensions 1..N
+        X_scaled[:, 1:] *= X_scaled[:, 0:1]
+        # Snap discrete dimensions to their grids
+        for n in self.discrete_indices:
+            X_scaled[:, n] = np.rint(X_scaled[:, n] / self.steps[n]) * self.steps[n]
+        return X_scaled
+
+
+@dataclass
 class FidelityDomain:
     """
     Defines the fidelity space domain which is discrete

@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 import pytest_cases
 from millefeuille import InputDomain
+from millefeuille.domain import ScaleFactorInputDomain
 
 
 @pytest_cases.fixture(params=[100, 1000])
@@ -83,3 +84,54 @@ def test_transform_feature(dim, b_low, b_up):
         for unit_val in [0.0, 0.25, 0.5, 0.75, 1.0]:
             real_val = domain.inverse_transform_feature(n, unit_val)
             assert np.isclose(domain.transform_feature(n, real_val), unit_val)
+
+
+@pytest.mark.unit
+def test_scale_factor_domain_continuous(nsample, dim, b_low, b_up):
+    """Scale factor applied to continuous dims: check output range and scaling."""
+    domain = ScaleFactorInputDomain(dim=dim, b_low=b_low, b_up=b_up, steps=np.zeros_like(b_low))
+
+    X_unit = np.random.rand(nsample, dim)
+    X_real = domain.inverse_transform(X_unit)
+
+    # Dimension 0 is the scale factor; recover it
+    scale_factor_real = (b_up[0] - b_low[0]) * X_unit[:, 0] + b_low[0]
+    assert np.allclose(X_real[:, 0], scale_factor_real)
+
+    # Dimensions 1..N should equal (physical value) * scale_factor
+    for n in range(1, dim):
+        expected = ((b_up[n] - b_low[n]) * X_unit[:, n] + b_low[n]) * scale_factor_real
+        assert np.allclose(X_real[:, n], expected)
+
+
+@pytest.mark.unit
+def test_scale_factor_domain_discrete(nsample, dim, b_low, b_up):
+    """Scale factor applied before snapping: discrete dims should lie on their grids."""
+    steps = np.zeros_like(b_low)
+    # Make all dimensions except dim 0 discrete
+    for i in range(1, dim):
+        steps[i] = (b_up[i] - b_low[i]) / 10.0
+
+    domain = ScaleFactorInputDomain(dim=dim, b_low=b_low, b_up=b_up, steps=steps)
+
+    X_unit = np.random.rand(nsample, dim)
+    X_real = domain.inverse_transform(X_unit)
+
+    scale_factor_real = (b_up[0] - b_low[0]) * X_unit[:, 0] + b_low[0]
+    assert np.allclose(X_real[:, 0], scale_factor_real)
+
+    # Discrete dimensions must be multiples of their step size
+    for n in domain.discrete_indices:
+        assert np.allclose(X_real[:, n] / steps[n], np.rint(X_real[:, n] / steps[n])), (
+            f"Discrete dim {n} values not on grid"
+        )
+
+
+@pytest.mark.unit
+def test_scale_factor_domain_inherits_transform(nsample, dim, b_low, b_up):
+    """transform() should behave identically to InputDomain.transform()."""
+    domain_sf = ScaleFactorInputDomain(dim=dim, b_low=b_low, b_up=b_up, steps=np.zeros_like(b_low))
+    domain_base = InputDomain(dim=dim, b_low=b_low, b_up=b_up, steps=np.zeros_like(b_low))
+
+    X = b_low[None, :] + (b_up[None, :] - b_low[None, :]) * np.random.rand(nsample, dim)
+    assert np.allclose(domain_sf.transform(X), domain_base.transform(X))
