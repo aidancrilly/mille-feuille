@@ -69,8 +69,7 @@ def surrogate_threshold_sampling(
         instead.
     """
     warnings.warn(
-        "surrogate_threshold_sampling is deprecated — use "
-        "SurrogateThresholdCandidateGenerator instead.",
+        "surrogate_threshold_sampling is deprecated — use SurrogateThresholdCandidateGenerator instead.",
         DeprecationWarning,
         stacklevel=2,
     )
