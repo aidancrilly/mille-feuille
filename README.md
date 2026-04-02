@@ -6,7 +6,8 @@
 
 `mille‑feuille` acts as an orchestrator when running sampling, learning and optimisation loops against expensive MPI-parallelised HPC codes. For optimisation, `mille‑feuille` is a thin wrapper on top of [**BoTorch**](https://botorch.org/), providing the necessary interface between simulators, surrogates and optimisers.
 
-> **Status:** early days – very much a work in progress
+> **Status:** early days – very much a work in progress.
+> Preliminary **asynchronous scheduling** support is available — see the [async_scheduling example](examples/async_scheduling/).
 
 Used in the following publications:
 
@@ -42,6 +43,7 @@ Take a look at the examples directory and sub-directories within:
 
 * *test_executables*: simple (fortran90 and C++) examples implemented for the test suite.
 * *loops*: example scripts which use `mille‑feuille` to perform sampling, learning and optimisation tasks. This example includes a template for a simulator with namelist based input and scheduling within a PBS environment.
+* *async_scheduling*: **(preliminary)** asynchronous scheduling example using `run_async_loop` to continuously launch and collect simulation evaluations, maximising core utilisation on a single compute node.
 
 ## Core components
 
