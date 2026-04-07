@@ -13,8 +13,7 @@ from millefeuille.surrogate import (
     SingleFidelityGPSurrogate,
     SingleFidelityRandomForestSurrogate,
 )
-from millefeuille.utils import run_Bayesian_optimiser, run_generator_loop
-from millefeuille.generators import BayesianOptimisationGenerator
+from millefeuille.utils import run_Bayesian_optimiser
 
 from .conftest import (
     TEST_KERNEL,
