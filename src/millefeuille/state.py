@@ -215,6 +215,10 @@ class State:
             self.X_names = self.auto_naming_and_check(None, self.Xs.shape, default_prefix="x_")
         if self.Y_names is None:
             self.Y_names = self.auto_naming_and_check(None, self.Ys.shape, default_prefix="y_")
+        if self.P_names is None and self.Ps is not None:
+            self.P_names = self.auto_naming_and_check(None, self.Ps.shape, default_prefix="p_")
+        if self.S_names is None and self.Ss is not None:
+            self.S_names = self.auto_naming_and_check(None, self.Ss.shape, default_prefix="s_")
 
         if refit_scaler and self.Ys.shape[0] > 1:
             self.Y_scaler.fit(self.Ys)
