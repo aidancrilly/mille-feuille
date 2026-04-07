@@ -374,7 +374,7 @@ def run_async_loop(
     initial_tasks = async_sched.create_tasks(idx_init, X_init, S_init)
 
     if refill_interval is None:
-        refill_interval = n_init
+        refill_interval = n_init // 2
 
     # --- book-keeping ------------------------------------------------------
     evaluations_launched = [n_init]
