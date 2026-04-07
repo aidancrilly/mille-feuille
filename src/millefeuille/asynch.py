@@ -232,13 +232,13 @@ class AsyncScheduler:
                         self._resources.release(task.cores_required)
 
                         # Reshape scalars / 1-D arrays for state.update
-                        Y_arr = np.asarray(Y).reshape(1,-1)
-                        P_arr = np.asarray(P).reshape(1,-1) if P is not None else None
+                        Y_arr = np.asarray(Y).reshape(1, -1)
+                        P_arr = np.asarray(P).reshape(1, -1) if P is not None else None
                         S_arr = np.array([[task.s]]) if task.s is not None else None
 
                         state.update(
                             index_next=np.array([task.index]),
-                            X_next=task.x.reshape(1,-1),
+                            X_next=task.x.reshape(1, -1),
                             Y_next=Y_arr,
                             P_next=P_arr,
                             S_next=S_arr,
