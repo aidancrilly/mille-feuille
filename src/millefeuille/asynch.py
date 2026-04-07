@@ -379,6 +379,7 @@ def run_async_loop(
     # --- book-keeping ------------------------------------------------------
     evaluations_launched = [n_init]
     completions_since_refill = [0]
+    idx_next = [idx_init[-1]]
 
     def _on_tasks_complete(state, completed_tasks):
         completions_since_refill[0] += len(completed_tasks)
@@ -404,10 +405,11 @@ def run_async_loop(
             X_new, S_new = _call_generator(generate_candidates, state, budget)
 
             n_new = X_new.shape[0]
-            idx_start = int(state.index.max()) + 1 if state.index is not None else 0
+            idx_start = idx_next[0] + 1
             idx_new = idx_start + np.arange(n_new)
             new_tasks = async_sched.create_tasks(idx_new, X_new, S_new)
 
+            idx_next[0] = idx_new[-1]
             evaluations_launched[0] += n_new
             return new_tasks
 
