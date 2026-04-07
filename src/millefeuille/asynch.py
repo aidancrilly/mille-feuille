@@ -369,12 +369,17 @@ def run_async_loop(
     X_init, S_init = _call_generator(generate_candidates, state, initial_budget)
 
     n_init = X_init.shape[0]
+    if n_init == 0:
+        raise ValueError(
+            "The initial candidate generator returned an empty batch; "
+            "run_async_loop requires at least one initial candidate."
+        )
     index_start = int(state.index.max()) + 1 if state.index is not None else 0
     idx_init = index_start + np.arange(n_init)
     initial_tasks = async_sched.create_tasks(idx_init, X_init, S_init)
 
     if refill_interval is None:
-        refill_interval = n_init // 2
+        refill_interval = max(1, n_init // 2)
 
     # --- book-keeping ------------------------------------------------------
     evaluations_launched = [n_init]
