@@ -4,6 +4,7 @@ import tempfile
 
 import numpy as np
 import pytest
+from millefeuille.domain import InputDomain
 from millefeuille.state import State
 
 from .conftest import ForresterDomain
@@ -113,3 +114,38 @@ def test_to_csv_skips_existing_index_values():
     finally:
         if os.path.exists(fname):
             os.remove(fname)
+
+
+@pytest.mark.unit
+def test_filling_empty_state():
+    dummy_domain = InputDomain(dim=1, b_low=np.array([0.0]), b_up=np.array([1.0]), steps=np.zeros(1))
+    empty_state = State(dummy_domain, index=None, Xs=None, Ys=None)
+
+    assert empty_state.index is None
+    assert empty_state.Xs is None
+    assert empty_state.Ys is None
+    assert empty_state.Ps is None
+    assert empty_state.Ss is None
+
+    assert empty_state.best_value == -np.inf
+    assert empty_state.best_value_transformed == -np.inf
+
+    # Add some data and check best value updates
+    new_Is = np.array([0.0, 1.0])
+    new_Xs = np.array([[0.5], [0.8]])
+    new_Ys = np.array([[0.3], [0.9]])
+    empty_state.update(new_Is, new_Xs, new_Ys)
+
+    assert empty_state.best_value == 0.9
+    assert empty_state.best_value_transformed > -np.inf
+
+    # Add single entry
+    empty_state = State(dummy_domain, index=None, Xs=None, Ys=None)
+
+    new_Is = np.array([0.0])
+    new_Xs = np.array([[0.5]])
+    new_Ys = np.array([[0.3]])
+    empty_state.update(new_Is, new_Xs, new_Ys)
+
+    assert empty_state.best_value == 0.3
+    assert empty_state.best_value_transformed > -np.inf

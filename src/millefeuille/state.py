@@ -223,8 +223,12 @@ class State:
             Ys_target = self.Ys[self.Ss[:, 0] == self.target_fidelity, :]
         else:
             Ys_target = self.Ys.copy()
+
         self.best_value = Ys_target.max(axis=0)
-        self.best_value_transformed = self.Y_scaler.transform(self.best_value, return_torch=False)
+        if self.Ys.shape[0] > 1:
+            self.best_value_transformed = self.Y_scaler.transform(self.best_value, return_torch=False)
+        else:
+            self.best_value_transformed = self.best_value.copy()
 
         self.nsamples = self.Ys.shape[0]
 
