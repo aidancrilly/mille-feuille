@@ -34,7 +34,7 @@ from millefeuille.domain import InputDomain
 from millefeuille.generators import CandidateGenerator, probabilistic_threshold_filter
 from millefeuille.simulator import ResourceManager
 from millefeuille.state import State
-from millefeuille.surrogate import RandomForestEnsembleModel
+from millefeuille.surrogate import SingleFidelityRandomForestSurrogate
 from Scheduler import MPIScheduler
 from scipy.stats.qmc import Sobol
 from Simulator import Simulator
