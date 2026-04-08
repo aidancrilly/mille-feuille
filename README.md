@@ -102,4 +102,48 @@ CI makes use of [cached IntelOneAPI install by scivision](https://gist.github.co
 
 ---
 
-Licensed under MIT © 2025
+## 📊 Dashboard
+
+`mille‑feuille` ships with an interactive Streamlit dashboard for inspecting optimisation state, surrogate quality, and optimal-design landscapes.
+
+### Install
+
+```bash
+pip install millefeuille[dashboard]
+# or, from a local clone:
+pip install -e .[dashboard]
+```
+
+### Launch
+
+```bash
+# From anywhere (installed as a console script)
+mf-dashboard
+
+# Custom port
+mf-dashboard --server.port 8502
+
+# On a remote server (SSH-forwarded) — headless mode is on by default
+mf-dashboard --server.port 8501
+```
+
+Then on your **local machine** forward the port over SSH:
+
+```bash
+ssh -L 8501:localhost:8501 user@remote-host
+```
+
+and open `http://localhost:8501` in your browser.
+
+### Tabs
+
+| Tab | Description |
+|-----|-------------|
+| **Scatter** | Select any two state columns as axes, optionally colour by a third |
+| **Corner Plot** | Corner plot of inputs coloured by objective, with a Y-threshold slider |
+| **Cross-Validation** | k-fold CV of the chosen surrogate with truth-vs-prediction and residual plots |
+| **Optimal Design** | Sweep each input while optimising the others — shows how Y* depends on each variable |
+
+---
+
+Licensed under MIT © 2025
