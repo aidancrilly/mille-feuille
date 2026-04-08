@@ -38,6 +38,7 @@ ignore = [
     "PT011", # `pytest.raises(ValueError)` is too broad, set the `match` parameter or use a more specific exception
     "PT018", # Assertion should be broken down into multiple parts
     "RUF059", # Unpacked variable `value` is never used
+    "RUF007", # Prefer `itertools.pairwise()` over `zip()` when iterating over successive pairs
 ]
 
 
