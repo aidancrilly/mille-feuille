@@ -296,6 +296,7 @@ def run_async_loop(
     scheduler=None,
     fidelity_configs=None,
     refill_interval=None,
+    index_start=None,
     max_workers=16,
     poll_interval=0.5,
     csv_name=None,
@@ -374,7 +375,8 @@ def run_async_loop(
             "The initial candidate generator returned an empty batch; "
             "run_async_loop requires at least one initial candidate."
         )
-    index_start = int(state.index.max()) + 1 if state.index is not None else 0
+    if index_start is None:
+        index_start = int(state.index.max()) + 1 if state.index is not None else 0
     idx_init = index_start + np.arange(n_init)
     initial_tasks = async_sched.create_tasks(idx_init, X_init, S_init)
 
