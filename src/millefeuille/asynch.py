@@ -223,10 +223,12 @@ class AsyncScheduler:
             while self._pending_tasks or futures:
                 # 1. Harvest completed futures
                 newly_completed: list[Task] = []
+                num_completed = 0
                 done = [f for f in futures if f.done()]
 
                 for future in done:
                     task = futures.pop(future)
+                    num_completed += 1
                     try:
                         _, P, Y = future.result()
                         self._resources.release(task.cores_required)
@@ -260,8 +262,8 @@ class AsyncScheduler:
                         logger.exception("Task %d failed", task.index)
 
                 # 2. Notify caller and accept new tasks
-                if newly_completed and on_tasks_complete is not None:
-                    new_tasks = on_tasks_complete(state, newly_completed)
+                if num_completed > 0 and on_tasks_complete is not None:
+                    new_tasks = on_tasks_complete(state, num _completed)
                     if new_tasks:
                         self._pending_tasks.extend(new_tasks)
 
@@ -381,15 +383,15 @@ def run_async_loop(
     initial_tasks = async_sched.create_tasks(idx_init, X_init, S_init)
 
     if refill_interval is None:
-        refill_interval = max(1, n_init // 2)
+        refill_interval = max(1, n_init)
 
     # --- book-keeping ------------------------------------------------------
     evaluations_launched = [n_init]
     completions_since_refill = [0]
     idx_next = [idx_init[-1]]
 
-    def _on_tasks_complete(state, completed_tasks):
-        completions_since_refill[0] += len(completed_tasks)
+    def _on_tasks_complete(state, num_completed_tasks):
+        completions_since_refill[0] += num_completed_tasks
 
         if csv_name is not None:
             state.to_csv(csv_name)
