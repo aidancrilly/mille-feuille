@@ -10,7 +10,7 @@ import torch
 from botorch.models.transforms.outcome import Standardize
 
 from .definitions import device, dtype
-from .domain import FidelityDomain, InputDomain
+from .domain import FidelityDomain, InputDomain, ScaleFactorInputDomain
 
 """
 Defines the optimiser state
@@ -421,6 +421,7 @@ class State:
             # ---- Metadata ----
             meta = {
                 "input_domain": {
+                    "type": type(self.input_domain).__name__,
                     "dim": int(self.input_domain.dim),
                     "b_low": self.input_domain.b_low.tolist(),
                     "b_up": self.input_domain.b_up.tolist(),
@@ -492,7 +493,8 @@ class State:
 
             # Reconstruct input domain
             id_meta = meta["input_domain"]
-            input_domain = InputDomain(
+            domain_cls = ScaleFactorInputDomain if id_meta.get("type") == "ScaleFactorInputDomain" else InputDomain
+            input_domain = domain_cls(
                 dim=id_meta["dim"],
                 b_low=np.array(id_meta["b_low"]),
                 b_up=np.array(id_meta["b_up"]),

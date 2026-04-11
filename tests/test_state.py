@@ -5,7 +5,7 @@ import tempfile
 
 import numpy as np
 import pytest
-from millefeuille.domain import InputDomain
+from millefeuille.domain import InputDomain, ScaleFactorInputDomain
 from millefeuille.state import State
 
 from .conftest import ForresterDomain
@@ -338,6 +338,86 @@ def test_save_load_multi_column_index():
 
         np.testing.assert_array_almost_equal(loaded.index, state.index)
         assert loaded.index_names == ["batch", "sample"]
+    finally:
+        if os.path.exists(fname):
+            os.remove(fname)
+
+
+@pytest.mark.unit
+def test_save_load_input_domain_type():
+    """Roundtrip with a regular InputDomain records the correct type."""
+    state = make_simple_state(n=5)
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+        fname = tmp.name
+    try:
+        os.remove(fname)
+        state.save(fname)
+        loaded = State.load(fname)
+
+        assert type(loaded.input_domain) is InputDomain
+        np.testing.assert_array_almost_equal(loaded.input_domain.b_low, state.input_domain.b_low)
+        np.testing.assert_array_almost_equal(loaded.input_domain.b_up, state.input_domain.b_up)
+        np.testing.assert_array_almost_equal(loaded.input_domain.steps, state.input_domain.steps)
+    finally:
+        if os.path.exists(fname):
+            os.remove(fname)
+
+
+@pytest.mark.unit
+def test_save_load_scale_factor_domain():
+    """Roundtrip with ScaleFactorInputDomain preserves the domain subclass."""
+    sf_domain = ScaleFactorInputDomain(dim=2, b_low=np.array([1.0, 0.0]), b_up=np.array([10.0, 1.0]), steps=np.zeros(2))
+    n = 5
+    Is = np.arange(n, dtype=float)
+    Xs = np.random.rand(n, 2)
+    Ys = np.random.rand(n, 1)
+    state = State(sf_domain, Is, Xs, Ys)
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+        fname = tmp.name
+    try:
+        os.remove(fname)
+        state.save(fname)
+        loaded = State.load(fname)
+
+        assert type(loaded.input_domain) is ScaleFactorInputDomain
+        np.testing.assert_array_almost_equal(loaded.input_domain.b_low, sf_domain.b_low)
+        np.testing.assert_array_almost_equal(loaded.input_domain.b_up, sf_domain.b_up)
+        np.testing.assert_array_almost_equal(loaded.input_domain.steps, sf_domain.steps)
+        np.testing.assert_array_almost_equal(loaded.Xs, state.Xs)
+        np.testing.assert_array_almost_equal(loaded.Ys, state.Ys)
+    finally:
+        if os.path.exists(fname):
+            os.remove(fname)
+
+
+@pytest.mark.unit
+def test_load_without_type_key_defaults_to_input_domain():
+    """DBs saved before the type field was added should load as InputDomain."""
+    state = make_simple_state(n=3)
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+        fname = tmp.name
+    try:
+        os.remove(fname)
+        state.save(fname)
+
+        # Manually strip the "type" key from the stored metadata
+        import json
+        import sqlite3
+
+        conn = sqlite3.connect(fname)
+        raw = conn.execute("SELECT value FROM metadata WHERE key = 'input_domain'").fetchone()[0]
+        meta = json.loads(raw)
+        meta.pop("type", None)
+        conn.execute(
+            "UPDATE metadata SET value = ? WHERE key = 'input_domain'",
+            (json.dumps(meta),),
+        )
+        conn.commit()
+        conn.close()
+
+        loaded = State.load(fname)
+        assert type(loaded.input_domain) is InputDomain
     finally:
         if os.path.exists(fname):
             os.remove(fname)
