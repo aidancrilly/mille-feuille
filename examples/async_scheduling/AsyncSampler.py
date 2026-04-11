@@ -34,7 +34,7 @@ from millefeuille.domain import InputDomain
 from millefeuille.generators import CandidateGenerator, probabilistic_threshold_filter
 from millefeuille.simulator import ResourceManager
 from millefeuille.state import State
-from millefeuille.surrogate import RandomForestEnsembleModel
+from millefeuille.surrogate import SingleFidelityRandomForestSurrogate
 from Scheduler import MPIScheduler
 from scipy.stats.qmc import Sobol
 from Simulator import Simulator
@@ -76,7 +76,7 @@ class RandomThenThresholdCandidateGenerator(CandidateGenerator):
         else:
             # Surrogate-guided threshold phase
             threshold_value = 0.1
-            Xs, _, _ = probabilistic_threshold_filter(
+            Xs, _, _, _ = probabilistic_threshold_filter(
                 self.domain,
                 state,
                 self.sampler,
@@ -125,7 +125,7 @@ if __name__ == "__main__":
     )
 
     # ── Surrogate ─────────────────────────────────────────────────────────
-    surrogate = RandomForestEnsembleModel()
+    surrogate = SingleFidelityRandomForestSurrogate()
 
     # ── Candidate generator ───────────────────────────────────────────────
     generate_candidates = RandomThenThresholdCandidateGenerator(

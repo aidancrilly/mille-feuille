@@ -224,10 +224,12 @@ class AsyncScheduler:
             while self._pending_tasks or futures:
                 # 1. Harvest completed futures
                 newly_completed: list[Task] = []
+                num_completed = 0
                 done = [f for f in futures if f.done()]
 
                 for future in done:
                     task = futures.pop(future)
+                    num_completed += 1
                     try:
                         _, P, Y = future.result()
                         self._resources.release(task.cores_required)
@@ -261,8 +263,8 @@ class AsyncScheduler:
                         logger.exception("Task %d failed", task.index)
 
                 # 2. Notify caller and accept new tasks
-                if newly_completed and on_tasks_complete is not None:
-                    new_tasks = on_tasks_complete(state, newly_completed)
+                if num_completed > 0 and on_tasks_complete is not None:
+                    new_tasks = on_tasks_complete(state, num_completed)
                     if new_tasks:
                         self._pending_tasks.extend(new_tasks)
 
@@ -297,6 +299,7 @@ def run_async_loop(
     scheduler=None,
     fidelity_configs=None,
     refill_interval=None,
+    index_start=None,
     max_workers=16,
     poll_interval=0.5,
     db_name=None,
@@ -372,20 +375,26 @@ def run_async_loop(
     X_init, S_init = _call_generator(generate_candidates, state, initial_budget)
 
     n_init = X_init.shape[0]
-    index_start = int(state.index.max()) + 1 if state.index is not None else 0
+    if n_init == 0:
+        raise ValueError(
+            "The initial candidate generator returned an empty batch; "
+            "run_async_loop requires at least one initial candidate."
+        )
+    if index_start is None:
+        index_start = int(state.index.max()) + 1 if state.index is not None else 0
     idx_init = index_start + np.arange(n_init)
     initial_tasks = async_sched.create_tasks(idx_init, X_init, S_init)
 
     if refill_interval is None:
-        refill_interval = n_init // 2
+        refill_interval = max(1, n_init)
 
     # --- book-keeping ------------------------------------------------------
     evaluations_launched = [n_init]
     completions_since_refill = [0]
     idx_next = [idx_init[-1]]
 
-    def _on_tasks_complete(state, completed_tasks):
-        completions_since_refill[0] += len(completed_tasks)
+    def _on_tasks_complete(state, num_completed_tasks):
+        completions_since_refill[0] += num_completed_tasks
 
         if db_name is not None:
             _ext = os.path.splitext(db_name)[1].lower()
@@ -415,6 +424,8 @@ def run_async_loop(
             X_new, S_new = _call_generator(generate_candidates, state, budget)
 
             n_new = X_new.shape[0]
+            if n_new == 0:
+                raise ValueError("generator returned 0 candidates inside run_asynch_loop...")
             idx_start = idx_next[0] + 1
             idx_new = idx_start + np.arange(n_new)
             new_tasks = async_sched.create_tasks(idx_new, X_new, S_new)
