@@ -415,13 +415,8 @@ class State:
             conn.execute("PRAGMA journal_mode=WAL")
 
             # ---- Schema ----
-            conn.execute(
-                f"CREATE TABLE IF NOT EXISTS state ({col_defs}, UNIQUE({index_constraint}))"
-            )
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS metadata "
-                "(key TEXT PRIMARY KEY, value TEXT)"
-            )
+            conn.execute(f"CREATE TABLE IF NOT EXISTS state ({col_defs}, UNIQUE({index_constraint}))")
+            conn.execute("CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT)")
 
             # ---- Metadata ----
             meta = {
@@ -450,14 +445,10 @@ class State:
                     fd_meta["fidelities"] = list(fd.fidelities)
                 if getattr(fd, "target_fidelity", None) is not None:
                     val = fd.target_fidelity
-                    fd_meta["target_fidelity"] = (
-                        val.tolist() if hasattr(val, "tolist") else val
-                    )
+                    fd_meta["target_fidelity"] = val.tolist() if hasattr(val, "tolist") else val
                 if getattr(fd, "fidelity_features", None) is not None:
                     val = fd.fidelity_features
-                    fd_meta["fidelity_features"] = (
-                        val.tolist() if hasattr(val, "tolist") else val
-                    )
+                    fd_meta["fidelity_features"] = val.tolist() if hasattr(val, "tolist") else val
                 meta["fidelity_domain"] = fd_meta
 
             for key, value in meta.items():
@@ -467,10 +458,7 @@ class State:
                 )
 
             # ---- Data rows (skip duplicates by index) ----
-            insert_sql = (
-                f"INSERT OR IGNORE INTO state ({quoted_col_names}) "
-                f"VALUES ({placeholders})"
-            )
+            insert_sql = f"INSERT OR IGNORE INTO state ({quoted_col_names}) VALUES ({placeholders})"
             conn.executemany(insert_sql, data.tolist())
 
             conn.commit()

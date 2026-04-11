@@ -235,8 +235,7 @@ def test_save_skips_existing_index():
         # Record the original Y value for index 0
         conn = sqlite3.connect(fname)
         original_y = conn.execute(
-            f'SELECT "{state.Y_names[0]}" FROM state '
-            f'WHERE "{state.index_names[0]}" = 0.0'
+            f'SELECT "{state.Y_names[0]}" FROM state WHERE "{state.index_names[0]}" = 0.0'
         ).fetchone()[0]
         conn.close()
 
@@ -250,8 +249,7 @@ def test_save_skips_existing_index():
         conn = sqlite3.connect(fname)
         rows = conn.execute("SELECT COUNT(*) FROM state").fetchone()[0]
         saved_y = conn.execute(
-            f'SELECT "{state.Y_names[0]}" FROM state '
-            f'WHERE "{state.index_names[0]}" = 0.0'
+            f'SELECT "{state.Y_names[0]}" FROM state WHERE "{state.index_names[0]}" = 0.0'
         ).fetchone()[0]
         conn.close()
 
@@ -287,9 +285,7 @@ def test_save_load_roundtrip():
 @pytest.mark.unit
 def test_save_raises_on_missing_data():
     """save() should raise ValueError when required arrays are missing."""
-    dummy_domain = InputDomain(
-        dim=1, b_low=np.array([0.0]), b_up=np.array([1.0]), steps=np.zeros(1)
-    )
+    dummy_domain = InputDomain(dim=1, b_low=np.array([0.0]), b_up=np.array([1.0]), steps=np.zeros(1))
     empty_state = State(dummy_domain, index=None, Xs=None, Ys=None)
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
         fname = tmp.name
@@ -308,9 +304,7 @@ def test_save_load_with_parameters():
     Xs = np.random.rand(5, 2)
     Ys = np.random.rand(5, 1)
     Ps = np.random.rand(5, 3)
-    domain = InputDomain(
-        dim=2, b_low=np.zeros(2), b_up=np.ones(2), steps=np.zeros(2)
-    )
+    domain = InputDomain(dim=2, b_low=np.zeros(2), b_up=np.ones(2), steps=np.zeros(2))
     state = State(domain, Is, Xs, Ys, Ps=Ps, P_names=["p_a", "p_b", "p_c"])
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
         fname = tmp.name
@@ -330,9 +324,7 @@ def test_save_load_with_parameters():
 def test_save_load_multi_column_index():
     """Roundtrip with multi-column composite index."""
     n = 5
-    Is = np.column_stack(
-        [np.arange(n, dtype=float), np.arange(10, 10 + n, dtype=float)]
-    )
+    Is = np.column_stack([np.arange(n, dtype=float), np.arange(10, 10 + n, dtype=float)])
     Xs = np.random.rand(n, 1)
     Ys = np.random.rand(n, 1)
     state = State(ForresterDomain, Is, Xs, Ys, index_names=["batch", "sample"])
