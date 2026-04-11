@@ -207,7 +207,7 @@ class AsyncScheduler:
             tasks:  Initial tasks to schedule (appended to any already pending).
             on_tasks_complete:
                 Optional callback
-                ``(state, completed_tasks) -> list[Task] | None, state``
+                ``(state, num_completed) -> list[Task] | None, state``
                 invoked in the main thread after processing newly completed
                 tasks.  May return additional tasks to enqueue.
                 May update state from disk
@@ -225,7 +225,6 @@ class AsyncScheduler:
 
             while self._pending_tasks or futures:
                 # 1. Harvest completed futures
-                newly_completed: list[Task] = []
                 num_completed = 0
                 done = [f for f in futures if f.done()]
 
@@ -249,7 +248,6 @@ class AsyncScheduler:
                             S_next=S_arr,
                         )
 
-                        newly_completed.append(task)
                         all_results.append((task, P, Y))
 
                         logger.info(
