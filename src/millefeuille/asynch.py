@@ -425,7 +425,7 @@ def run_async_loop(
 
             n_new = X_new.shape[0]
             if n_new == 0:
-                raise ValueError("generator returned 0 candidates inside run_asynch_loop...")
+                raise ValueError("generator returned 0 candidates inside run_async_loop...")
             idx_start = idx_next[0] + 1
             idx_new = idx_start + np.arange(n_new)
             new_tasks = async_sched.create_tasks(idx_new, X_new, S_new)
