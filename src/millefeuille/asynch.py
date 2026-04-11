@@ -206,9 +206,11 @@ class AsyncScheduler:
             state:  ``State`` instance — updated in-place with results.
             tasks:  Initial tasks to schedule (appended to any already pending).
             on_tasks_complete:
-                Optional callback ``(state, completed_tasks) -> list[Task] | None``
+                Optional callback 
+                ``(state, completed_tasks) -> list[Task] | None, state``
                 invoked in the main thread after processing newly completed
-                tasks.  May return additional tasks to enqueue.
+                tasks.  May return additional tasks to enqueue. 
+                May update state from disk
 
         Returns:
             List of ``(Task, P, Y)`` tuples for every completed task.
