@@ -66,5 +66,5 @@ if __name__ == "__main__":
         state=state,
         simulator=batched_simulator,
         scheduler=scheduler,
-        csv_name=output_file,
+        db_name=output_file,
     )

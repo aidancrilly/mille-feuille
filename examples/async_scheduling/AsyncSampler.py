@@ -135,7 +135,7 @@ if __name__ == "__main__":
     )
 
     # ── Run ───────────────────────────────────────────────────────────────
-    csv_name = "async_results.csv"
+    db_name = "async_results.csv"
 
     run_async_loop(
         total_evaluations,
@@ -145,6 +145,6 @@ if __name__ == "__main__":
         resource_manager,
         scheduler=scheduler,
         max_workers=8,
-        csv_name=csv_name,
+        db_name=db_name,
         poll_interval=10,
     )
