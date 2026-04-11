@@ -436,7 +436,7 @@ def run_async_loop(
             evaluations_launched[0] += n_new
             return new_tasks, state
 
-        return None
+        return None, state
 
     # --- run ---------------------------------------------------------------
     async_sched.run(state, initial_tasks, on_tasks_complete=_on_tasks_complete)
