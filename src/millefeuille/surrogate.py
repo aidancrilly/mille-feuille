@@ -640,19 +640,20 @@ class RandomForestEnsembleModel(EnsembleModel):
     def forward(self, X: Tensor) -> Tensor:
         # X shape: (*batch_shape, q, D)
         X_np = X.cpu().double().numpy()
-        N, q, D = X.shape  # Samples, q-batch, Feature
+        batch_shape = X.shape[:-2]
+        q, D = X.shape[-2:]
 
         X_flat = X_np.reshape(-1, D)
 
         # Collect predictions from each tree: (n_estimators, prod(batch_shape)*q)
         tree_preds = np.array([est.predict(X_flat) for est in self.rf.estimators_])
 
-        # Reshape to (n_estimators, N, q)
-        tree_preds = tree_preds.reshape(len(self.rf.estimators_), N, q)
+        # Reshape to (n_estimators, *batch_shape, q)
+        tree_preds = tree_preds.reshape(len(self.rf.estimators_), *batch_shape, q)
 
-        # Transpose to (N, n_estimators, q) then add output dim
-        tree_preds = np.transpose(tree_preds, [1, 0, 2])  # (N, n_estimators, q)
-        # Add output dimension: (N, n_estimators, q, m=1)
+        # Move estimator axis behind batch dims: (*batch_shape, n_estimators, q)
+        tree_preds = np.moveaxis(tree_preds, 0, len(batch_shape))
+        # Add output dimension: (*batch_shape, n_estimators, q, m=1)
         tree_preds = tree_preds[..., np.newaxis]
 
         return torch.tensor(tree_preds, dtype=X.dtype, device=X.device)

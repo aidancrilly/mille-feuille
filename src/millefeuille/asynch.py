@@ -264,9 +264,11 @@ class AsyncScheduler:
 
                 # 2. Notify caller and accept new tasks
                 if num_completed > 0 and on_tasks_complete is not None:
-                    new_tasks, state = on_tasks_complete(state, num_completed)
-                    if new_tasks:
-                        self._pending_tasks.extend(new_tasks)
+                    result = on_tasks_complete(state, num_completed)
+                    if result is not None:
+                        new_tasks, state = result
+                        if new_tasks:
+                            self._pending_tasks.extend(new_tasks)
 
                 # 3. Schedule tasks that fit within available resources
                 to_launch = self._schedule_next()
@@ -408,7 +410,7 @@ def run_async_loop(
 
         remaining = total_evaluations - evaluations_launched[0]
         if remaining <= 0:
-            return None
+            return None, state
 
         if completions_since_refill[0] >= refill_interval:
             completions_since_refill[0] = 0
