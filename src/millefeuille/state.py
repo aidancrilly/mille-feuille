@@ -1,8 +1,9 @@
 import csv
+import json
 import os
+import sqlite3
 from dataclasses import dataclass
 
-import h5py
 import numpy as np
 import numpy.typing as npt
 import torch
@@ -58,6 +59,18 @@ def remove_nan_rows(arrays):
     # Remove rows at indices with NaNs from each non-None array
     cleaned_arrays = [arr[~nan_mask] if arr is not None else None for arr in arrays]
     return cleaned_arrays
+
+
+def _numpy_dtype_to_sqlite(dt):
+    """Map a numpy dtype to a SQLite column type string."""
+    if np.issubdtype(dt, np.integer):
+        return "INTEGER"
+    return "REAL"
+
+
+def _quote_id(name: str) -> str:
+    """Double-quote a SQL identifier, escaping embedded double-quotes."""
+    return '"' + name.replace('"', '""') + '"'
 
 
 class StandardScaler(Standardize):
@@ -347,166 +360,211 @@ class State:
             writer.writerows(new_data)
 
     def save(self, filename: str):
-        # Use variable-length UTF-8 strings for names
-        str_dt = h5py.string_dtype(encoding="utf-8")
+        """
+        Save state to a SQLite database file.
 
-        with h5py.File(filename, "w") as f:
-            # --------------------
-            # Input domain
-            # --------------------
-            grp_in = f.create_group("input_domain")
-            grp_in.create_dataset("b_low", data=self.input_domain.b_low)
-            grp_in.create_dataset("b_up", data=self.input_domain.b_up)
-            grp_in.create_dataset("steps", data=self.input_domain.steps)
-            f.attrs["input_dim"] = int(self.input_domain.dim)
+        Creates the database and table if they do not exist.
+        Appends only new rows, using index columns as a unique key
+        to skip duplicates (INSERT OR IGNORE).
 
-            # --------------------
-            # Fidelity domain (optional)
-            # --------------------
-            if self.fidelity_domain is not None:
-                grp_fd = f.create_group("fidelity_domain")
-                grp_fd.attrs["num_fidelities"] = int(self.fidelity_domain.num_fidelities)
+        Column order: index, Ss (if present), Xs, Ps (if present), Ys.
+        """
+        if self.index is None or self.Xs is None or self.Ys is None:
+            raise ValueError("index, Xs, and Ys must not be None")
 
-                # Store what we can, if present on the object
-                if getattr(self.fidelity_domain, "costs", None) is not None:
-                    grp_fd.create_dataset("costs", data=np.asarray(self.fidelity_domain.costs))
-                if getattr(self.fidelity_domain, "fidelities", None) is not None:
-                    grp_fd.create_dataset("fidelities", data=np.asarray(self.fidelity_domain.fidelities))
-                if getattr(self.fidelity_domain, "target_fidelity", None) is not None:
-                    grp_fd.create_dataset("target_fidelity", data=np.asarray(self.fidelity_domain.target_fidelity))
-                if getattr(self.fidelity_domain, "fidelity_features", None) is not None:
-                    grp_fd.create_dataset("fidelity_features", data=np.asarray(self.fidelity_domain.fidelity_features))
-                f.attrs["has_fidelity_domain"] = True
-            else:
-                f.attrs["has_fidelity_domain"] = False
+        # ---- Build column definitions and data in canonical order ----
+        columns = []  # list of (name, sqlite_type)
+        arrays = []
 
-            # --------------------
-            # Arrays (only create datasets if present)
-            # --------------------
-            for name in ("index", "Xs", "Ys", "Ps", "Ss"):
-                arr = getattr(self, name)
-                if arr is not None:
-                    f.create_dataset(name, data=arr)
+        indices = check_for_2D_shape([self.index])[0]
+        for name in self.index_names:
+            columns.append((name, _numpy_dtype_to_sqlite(indices.dtype)))
+        arrays.append(indices)
 
-            # --------------------
-            # Column name lists
-            # --------------------
-            names_map = {
-                "index_names": self.index_names,
-                "X_names": self.X_names,
-                "Y_names": self.Y_names,
-                "P_names": self.P_names,
-                "S_names": self.S_names,
-            }
-            for key, val in names_map.items():
-                if val is not None:
-                    # store as variable-length UTF-8 strings
-                    f.create_dataset(key, data=np.array(val, dtype=object), dtype=str_dt)
+        if self.Ss is not None:
+            for name in self.S_names:
+                columns.append((name, _numpy_dtype_to_sqlite(self.Ss.dtype)))
+            arrays.append(self.Ss)
 
-            # --------------------
-            # Metadata
-            # --------------------
-            f.attrs["nsamples"] = int(self.nsamples)
+        for name in self.X_names:
+            columns.append((name, _numpy_dtype_to_sqlite(self.Xs.dtype)))
+        arrays.append(self.Xs)
 
-            # Save best values as datasets (vector-friendly).
-            # Also keep attrs for backward compatibility/readability.
-            if self.best_value is not None:
-                f.create_dataset("best_value", data=np.asarray(self.best_value))
-                try:
-                    # If vector, HDF5 can still store as attr; if it fails, we skip.
-                    f.attrs["best_value"] = np.asarray(self.best_value)
-                except Exception:
-                    pass
+        if self.Ps is not None:
+            for name in self.P_names:
+                columns.append((name, _numpy_dtype_to_sqlite(self.Ps.dtype)))
+            arrays.append(self.Ps)
 
-            if self.best_value_transformed is not None:
-                f.create_dataset("best_value_transformed", data=np.asarray(self.best_value_transformed))
-                try:
-                    f.attrs["best_value_transformed"] = np.asarray(self.best_value_transformed)
-                except Exception:
-                    pass
+        for name in self.Y_names:
+            columns.append((name, _numpy_dtype_to_sqlite(self.Ys.dtype)))
+        arrays.append(self.Ys)
 
-    @staticmethod
-    def load(filename: str, Y_scaler: None | object):
-        def _read_list_of_str(fobj, key):
-            if key in fobj:
-                raw = fobj[key][:]
-                # Handle bytes vs str
-                return [s.decode("utf-8") if isinstance(s, bytes | np.bytes_) else str(s) for s in raw]
-            return None
+        data = np.hstack(arrays)
 
-        with h5py.File(filename, "r") as f:
-            # --------------------
-            # Input domain
-            # --------------------
-            input_domain = InputDomain(
-                dim=int(f.attrs["input_dim"]),
-                b_low=f["input_domain/b_low"][:],
-                b_up=f["input_domain/b_up"][:],
-                steps=f["input_domain/steps"][:],
+        col_defs = ", ".join(f"{_quote_id(c[0])} {c[1]}" for c in columns)
+        index_constraint = ", ".join(_quote_id(n) for n in self.index_names)
+        quoted_col_names = ", ".join(_quote_id(c[0]) for c in columns)
+        placeholders = ", ".join("?" for _ in columns)
+
+        conn = sqlite3.connect(filename, timeout=30)
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+
+            # ---- Schema ----
+            conn.execute(
+                f"CREATE TABLE IF NOT EXISTS state ({col_defs}, UNIQUE({index_constraint}))"
+            )
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS metadata "
+                "(key TEXT PRIMARY KEY, value TEXT)"
             )
 
-            # --------------------
-            # Fidelity domain (optional)
-            # --------------------
-            fidelity_domain = None
-            if bool(f.attrs.get("has_fidelity_domain", False)):
-                grp = f["fidelity_domain"]
-                # Older files might only have costs; newer can have more fields
-                costs = grp["costs"][:].tolist() if "costs" in grp else None
-                fidelity_domain = FidelityDomain(
-                    num_fidelities=int(grp.attrs["num_fidelities"]),
-                    costs=costs,
+            # ---- Metadata ----
+            meta = {
+                "input_domain": {
+                    "dim": int(self.input_domain.dim),
+                    "b_low": self.input_domain.b_low.tolist(),
+                    "b_up": self.input_domain.b_up.tolist(),
+                    "steps": self.input_domain.steps.tolist(),
+                },
+                "column_names": {
+                    "index_names": self.index_names,
+                    "X_names": self.X_names,
+                    "Y_names": self.Y_names,
+                    "P_names": self.P_names,
+                    "S_names": self.S_names,
+                },
+            }
+
+            if self.fidelity_domain is not None:
+                fd = self.fidelity_domain
+                fd_meta = {
+                    "num_fidelities": int(fd.num_fidelities),
+                    "costs": getattr(fd, "costs", None),
+                }
+                if getattr(fd, "fidelities", None) is not None:
+                    fd_meta["fidelities"] = list(fd.fidelities)
+                if getattr(fd, "target_fidelity", None) is not None:
+                    val = fd.target_fidelity
+                    fd_meta["target_fidelity"] = (
+                        val.tolist() if hasattr(val, "tolist") else val
+                    )
+                if getattr(fd, "fidelity_features", None) is not None:
+                    val = fd.fidelity_features
+                    fd_meta["fidelity_features"] = (
+                        val.tolist() if hasattr(val, "tolist") else val
+                    )
+                meta["fidelity_domain"] = fd_meta
+
+            for key, value in meta.items():
+                conn.execute(
+                    "INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)",
+                    (key, json.dumps(value)),
                 )
-                # Fill optional fields when available
-                if "fidelities" in grp:
-                    fidelity_domain.fidelities = grp["fidelities"][:].tolist()
-                if "target_fidelity" in grp:
-                    fidelity_domain.target_fidelity = grp["target_fidelity"][:]
-                if "fidelity_features" in grp:
-                    fidelity_domain.fidelity_features = grp["fidelity_features"][:]
 
-            # --------------------
-            # Arrays
-            # --------------------
-            index = f["index"][:] if "index" in f else None
-            Xs = f["Xs"][:] if "Xs" in f else None
-            Ys = f["Ys"][:] if "Ys" in f else None
-            Ps = f["Ps"][:] if "Ps" in f else None
-            Ss = f["Ss"][:] if "Ss" in f else None
+            # ---- Data rows (skip duplicates by index) ----
+            insert_sql = (
+                f"INSERT OR IGNORE INTO state ({quoted_col_names}) "
+                f"VALUES ({placeholders})"
+            )
+            conn.executemany(insert_sql, data.tolist())
 
-            # --------------------
-            # Column name lists (optional)
-            # --------------------
-            index_names = _read_list_of_str(f, "index_names")
-            X_names = _read_list_of_str(f, "X_names")
-            Y_names = _read_list_of_str(f, "Y_names")
-            P_names = _read_list_of_str(f, "P_names")
-            S_names = _read_list_of_str(f, "S_names")
+            conn.commit()
+        finally:
+            conn.close()
 
-            # --------------------
-            # Metadata
-            # --------------------
-            nsamples = int(f.attrs.get("nsamples", Ys.shape[0] if Ys is not None else 0))
+    @staticmethod
+    def load(filename: str, Y_scaler: None | object = None):
+        """
+        Load state from a SQLite database file.
 
-            # Prefer datasets (vector-safe); fall back to (older) attrs when needed
-            if "best_value" in f:
-                best_value = f["best_value"][:]
-            else:
-                # Older files may have stored a scalar attr
-                best_value = np.asarray(f.attrs.get("best_value", -float("inf")))
+        Parameters
+        ----------
+        filename : str
+            Path to the SQLite database.
+        Y_scaler : object, optional
+            Output scaler. A fresh StandardScaler is created when *None*.
 
-            if "best_value_transformed" in f:
-                best_value_transformed = f["best_value_transformed"][:]
-            else:
-                best_value_transformed = np.asarray(f.attrs.get("best_value_transformed", -float("inf")))
+        Returns
+        -------
+        State
+        """
+        conn = sqlite3.connect(filename, timeout=30)
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+
+            # ---- Metadata ----
+            meta = {}
+            for key, value in conn.execute("SELECT key, value FROM metadata"):
+                meta[key] = json.loads(value)
+
+            # Reconstruct input domain
+            id_meta = meta["input_domain"]
+            input_domain = InputDomain(
+                dim=id_meta["dim"],
+                b_low=np.array(id_meta["b_low"]),
+                b_up=np.array(id_meta["b_up"]),
+                steps=np.array(id_meta["steps"]),
+            )
+
+            # Reconstruct fidelity domain (optional)
+            fidelity_domain = None
+            if "fidelity_domain" in meta:
+                fd_meta = meta["fidelity_domain"]
+                fidelity_domain = FidelityDomain(
+                    num_fidelities=fd_meta["num_fidelities"],
+                    costs=fd_meta.get("costs"),
+                )
+                if fd_meta.get("fidelities") is not None:
+                    fidelity_domain.fidelities = fd_meta["fidelities"]
+                if fd_meta.get("target_fidelity") is not None:
+                    fidelity_domain.target_fidelity = np.array(fd_meta["target_fidelity"])
+                if fd_meta.get("fidelity_features") is not None:
+                    fidelity_domain.fidelity_features = np.array(fd_meta["fidelity_features"])
+
+            # Column names
+            cn = meta["column_names"]
+            index_names = cn["index_names"]
+            X_names = cn["X_names"]
+            Y_names = cn["Y_names"]
+            P_names = cn.get("P_names")
+            S_names = cn.get("S_names")
+
+            # ---- Data ----
+            cursor = conn.execute("SELECT * FROM state")
+            rows = cursor.fetchall()
+
+            if len(rows) == 0:
+                return State(
+                    input_domain=input_domain,
+                    index=None,
+                    Xs=None,
+                    Ys=None,
+                    index_names=index_names,
+                    X_names=X_names,
+                    Y_names=Y_names,
+                    P_names=P_names,
+                    S_names=S_names,
+                    Y_scaler=Y_scaler,
+                    fidelity_domain=fidelity_domain,
+                )
+
+            data = np.array(rows, dtype=float)
+            db_col_names = [desc[0] for desc in cursor.description]
+
+            def _extract(names):
+                if names is None:
+                    return None
+                col_indices = [db_col_names.index(n) for n in names]
+                return data[:, col_indices]
 
             return State(
                 input_domain=input_domain,
-                index=index,
-                Xs=Xs,
-                Ys=Ys,
-                Ps=Ps,
-                Ss=Ss,
+                index=_extract(index_names),
+                Xs=_extract(X_names),
+                Ys=_extract(Y_names),
+                Ps=_extract(P_names),
+                Ss=_extract(S_names),
                 index_names=index_names,
                 X_names=X_names,
                 Y_names=Y_names,
@@ -514,7 +572,6 @@ class State:
                 S_names=S_names,
                 Y_scaler=Y_scaler,
                 fidelity_domain=fidelity_domain,
-                nsamples=nsamples,
-                best_value=best_value,
-                best_value_transformed=best_value_transformed,
             )
+        finally:
+            conn.close()

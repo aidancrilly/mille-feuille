@@ -12,6 +12,7 @@ Key components:
 """
 
 import logging
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -298,7 +299,7 @@ def run_async_loop(
     refill_interval=None,
     max_workers=16,
     poll_interval=0.5,
-    csv_name=None,
+    db_name=None,
     verbose=False,
 ):
     """Generic asynchronous evaluation loop with a pluggable candidate generator.
@@ -332,7 +333,9 @@ def run_async_loop(
                             (default: first batch size).
         max_workers:        Thread-pool size (default 16).
         poll_interval:      Seconds between scheduling checks (default 0.5).
-        csv_name:           Optional CSV path to persist state.
+        db_name:            Optional file path to persist state.  Uses
+                            ``to_csv`` for ``.csv`` extensions and ``save``
+                            (SQLite) for anything else (e.g. ``.db``).
         verbose:            Enable info-level log messages.
 
     Returns:
@@ -384,8 +387,15 @@ def run_async_loop(
     def _on_tasks_complete(state, completed_tasks):
         completions_since_refill[0] += len(completed_tasks)
 
-        if csv_name is not None:
-            state.to_csv(csv_name)
+        if db_name is not None:
+            _ext = os.path.splitext(db_name)[1].lower()
+            if _ext == ".csv":
+                state.to_csv(db_name)
+            else:
+                from .state import State
+
+                state.save(db_name)
+                state = State.load(db_name, Y_scaler=state.Y_scaler)
 
         remaining = total_evaluations - evaluations_launched[0]
         if remaining <= 0:

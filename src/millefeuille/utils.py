@@ -1,3 +1,4 @@
+import os
 import warnings
 
 from .generators import BayesianOptimisationGenerator, greedy_exclusion, probabilistic_threshold_filter
@@ -17,6 +18,28 @@ The standalone sampling functions (``probabilistic_threshold_sampling``,
 are kept for backwards compatibility but are deprecated — use the generator
 classes in ``millefeuille.generators`` instead.
 """
+
+
+def _persist_state(state, db_name: str):
+    """Persist *state* to disk, choosing the method by file extension.
+
+    * ``.csv`` → ``state.to_csv(db_name)``  (no reload)
+    * anything else (e.g. ``.db``, ``.sqlite``) → ``state.save(db_name)``
+      followed by a ``State.load(db_name)`` so that rows written by other
+      processes are picked up.
+
+    Returns:
+        The (possibly reloaded) ``State``.
+    """
+    from .state import State
+
+    ext = os.path.splitext(db_name)[1].lower()
+    if ext == ".csv":
+        state.to_csv(db_name)
+    else:
+        state.save(db_name)
+        state = State.load(db_name, Y_scaler=state.Y_scaler)
+    return state
 
 
 # ---------------------------------------------------------------------------
@@ -172,7 +195,7 @@ def run_Bayesian_optimiser(
     surrogate,
     simulator,
     scheduler=None,
-    csv_name=None,
+    db_name=None,
     verbose=False,
     **kwargs,
 ):
@@ -197,7 +220,7 @@ def run_Bayesian_optimiser(
         state=state,
         simulator=simulator,
         scheduler=scheduler,
-        csv_name=csv_name,
+        db_name=db_name,
     )
 
 
@@ -208,7 +231,7 @@ def run_generator_loop(
     state,
     simulator,
     scheduler=None,
-    csv_name=None,
+    db_name=None,
 ):
     """Synchronous generate-evaluate loop with a pluggable candidate generator.
 
@@ -236,8 +259,10 @@ def run_generator_loop(
         simulator:          ``ExectuableSimulator`` or ``PythonSimulator``.
         scheduler:          ``Scheduler`` instance (required for
                             ``ExectuableSimulator``).
-        csv_name:           Optional CSV path to persist state after each
-                            iteration.
+        db_name:            Optional file path to persist state after each
+                            iteration.  Uses ``to_csv`` for ``.csv``
+                            extensions and ``save`` (SQLite) for anything
+                            else (e.g. ``.db``, ``.sqlite``).
 
     Returns:
         Updated ``State``.
@@ -257,7 +282,7 @@ def run_generator_loop(
             print("simulator class not recognised, inherit for mille-feuille Simulator classes...")
 
         state.update(index_next, X_next=X_next, Y_next=Y_next, P_next=P_next, S_next=S_next)
-        if csv_name is not None:
-            state.to_csv(csv_name)
+        if db_name is not None:
+            state = _persist_state(state, db_name)
 
     return state
