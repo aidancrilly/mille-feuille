@@ -32,7 +32,7 @@ pip install -e .[dev]
 python dev_fetch_deps.py # Grabs header file needed by C++ test script
 ```
 
-Requires **Python ≥ 3.11**. Core dependencies (`botorch`, `gpytorch`, `numpy`, `scipy`, `scikit‑learn` …) are pulled in automatically. 
+Requires **Python ≥ 3.11**. Core dependencies (`botorch`, `gpytorch`, `numpy`, `scipy`, `scikit‑learn` …) are pulled in automatically.
 
 ---
 
@@ -54,7 +54,7 @@ Take a look at the examples directory and sub-directories within
 2. *FidelityDomain* holds information regarding the degrees of simulation fidelity.
 3. *State* holds the necessary data taken from simulation samples: indices (Is), inputs (Xs), output parameters (Ps), fidelities (Ss) and objectives (Ys). State now supports **empty initialisation** (all arrays `None`) with lazy naming on the first update — useful for workflows where no data exists at construction time. Persistence uses **SQLite** (`state.save()` / `State.load()`) for robust, append-friendly storage.
 
-These classes hold the necessary information to train surrogate models. `mille‑feuille` has a number of abstract base classes as well as concrete examples of surrogate models including **Gaussian Processes** (using GPyTorch and BOTorch), **Neural Network Ensembles** (using PyTorch and BOTorch) and **Random Forest ensembles** (via scikit-learn's `RandomForestRegressor`). 
+These classes hold the necessary information to train surrogate models. `mille‑feuille` has a number of abstract base classes as well as concrete examples of surrogate models including **Gaussian Processes** (using GPyTorch and BOTorch), **Neural Network Ensembles** (using PyTorch and BOTorch) and **Random Forest ensembles** (via scikit-learn's `RandomForestRegressor`).
 
 ### Simulators and Schedulers
 
