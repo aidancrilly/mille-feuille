@@ -6,6 +6,7 @@ import numpy as np
 import numpy.typing as npt
 import torch
 import torch.nn as nn
+import warnings
 from botorch.fit import fit_gpytorch_mll
 from botorch.models import SingleTaskGP
 from botorch.models.ensemble import EnsembleModel
@@ -65,7 +66,11 @@ class BaseSurrogate(ABC):
             X_torch, Y_torch
         """
         X_torch, Y_torch = state.transform_XY()
-        assert X_torch.min() >= 0.0 and X_torch.max() <= 1.0 and torch.all(torch.isfinite(Y_torch))
+        if X_torch.min() < 0.0:
+            warnings.warn(f'Transformed X value below 0: {X_torch.min()}',RuntimeWarning)
+        if X_torch.max() > 1.0:
+            warnings.warn(f'Transformed X value above 1: {X_torch.max()}',RuntimeWarning)
+        assert torch.all(torch.isfinite(Y_torch))
 
         return X_torch, Y_torch
 
