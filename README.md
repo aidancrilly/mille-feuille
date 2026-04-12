@@ -86,10 +86,6 @@ The async system introduces several supporting components:
 * `run_generator_loop` — synchronous loop driven by any `CandidateGenerator`, decoupling the candidate strategy from the evaluation loop.
 * `run_async_loop` — asynchronous execution, `AsyncScheduler` continuously launches and collects simulations via a `ThreadPoolExecutor` and supplied `CandidateGenerator`.
 
-### Fixed-feature optimisation
-
-`suggest_next_locations` (and the underlying `generate_batch`) accepts a `fixed_features` dictionary to pin specific input dimensions to fixed values during acquisition-function optimisation. Values are automatically transformed from real to normalised units.
-
 ### Candidate Generators
 
 `mille‑feuille` provides an interchangable system of **candidate generators** that produce the next batch of inputs to evaluate.  Every generator implements the same `CandidateGenerator` interface and returns `(indices, Xs, Ss)`, so they can be plugged into `run_generator_loop` or the async scheduler interchangeably.
@@ -112,6 +108,10 @@ Wrapper generators take another generator as input and refine its output:
 | Generator | Effect |
 |---|---|
 | `GreedyExclusionGenerator` | PCA-normalised proximity-based exclusion to avoid clustered candidates.
+
+### Fixed-feature optimisation
+
+`suggest_next_locations` (and the underlying `generate_batch`) accepts a `fixed_features` dictionary to pin specific input dimensions to fixed values during acquisition-function optimisation. Values are automatically transformed from real to normalised units.
 
 ## Additional Info
 
