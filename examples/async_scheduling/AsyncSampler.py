@@ -76,6 +76,7 @@ class RandomThenThresholdCandidateGenerator(CandidateGenerator):
         else:
             # Surrogate-guided threshold phase
             threshold_value = 0.1
+            self.surrogate.fit(state)
             Xs, _, _, _ = probabilistic_threshold_filter(
                 self.domain,
                 state,
@@ -115,14 +116,21 @@ if __name__ == "__main__":
     # ── Domain ────────────────────────────────────────────────────────────
     domain, X_names = InputDomain.read_json("./domain.json")
 
-    # ── Empty initial state ───────────────────────────────────────────────
-    state = State(
-        input_domain=domain,
-        index=None,
-        Xs=None,
-        Ys=None,
-        X_names=X_names,
-    )
+    # ── Load or create initial state ──────────────────────────────────────
+    db_name = "async_results.db"
+    try:
+        state = State.load(db_name)
+        print(f"Loaded state from {db_name} with {len(state.index)} completed evaluations.")
+        index_start = max(state.index) + 1
+    except FileNotFoundError:
+        state = State(
+            input_domain=domain,
+            index=None,
+            Xs=None,
+            Ys=None,
+            X_names=X_names,
+        )
+        index_start = 0
 
     # ── Surrogate ─────────────────────────────────────────────────────────
     surrogate = SingleFidelityRandomForestSurrogate()
@@ -135,7 +143,6 @@ if __name__ == "__main__":
     )
 
     # ── Run ───────────────────────────────────────────────────────────────
-    db_name = "async_results.csv"
 
     run_async_loop(
         total_evaluations,
@@ -146,5 +153,6 @@ if __name__ == "__main__":
         scheduler=scheduler,
         max_workers=8,
         db_name=db_name,
+        index_start=index_start,
         poll_interval=10,
     )

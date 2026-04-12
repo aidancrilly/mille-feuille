@@ -1,4 +1,5 @@
 import copy
+import warnings
 from abc import ABC, abstractmethod
 from typing import Dict, List
 
@@ -6,7 +7,6 @@ import numpy as np
 import numpy.typing as npt
 import torch
 import torch.nn as nn
-import warnings
 from botorch.fit import fit_gpytorch_mll
 from botorch.models import SingleTaskGP
 from botorch.models.ensemble import EnsembleModel
@@ -67,9 +67,9 @@ class BaseSurrogate(ABC):
         """
         X_torch, Y_torch = state.transform_XY()
         if X_torch.min() < 0.0:
-            warnings.warn(f'Transformed X value below 0: {X_torch.min()}',RuntimeWarning)
+            warnings.warn(f"Transformed X value below 0: {X_torch.min()}", RuntimeWarning, stacklevel=2)
         if X_torch.max() > 1.0:
-            warnings.warn(f'Transformed X value above 1: {X_torch.max()}',RuntimeWarning)
+            warnings.warn(f"Transformed X value above 1: {X_torch.max()}", RuntimeWarning, stacklevel=2)
         assert torch.all(torch.isfinite(Y_torch))
 
         return X_torch, Y_torch
