@@ -1,13 +1,50 @@
-import numpy as np
-from scipy.stats import norm
+import os
+import warnings
 
+from .generators import BayesianOptimisationGenerator, greedy_exclusion, probabilistic_threshold_filter
 from .optimise import *
 from .simulator import *
 from .surrogate import BaseSurrogate
 
 """
-Defines some useful utility functions which do not fit into the defined classes
+Utility functions for running generate-evaluate loops.
+
+Candidate generation is handled by the generator classes in
+``millefeuille.generators``.  This module provides loop runners that
+pair any ``CandidateGenerator`` with a simulator.
+
+The standalone sampling functions (``probabilistic_threshold_sampling``,
+``surrogate_threshold_sampling``, ``probabilistic_threshold_sampling_with_exclusion``)
+are kept for backwards compatibility but are deprecated — use the generator
+classes in ``millefeuille.generators`` instead.
 """
+
+
+def _persist_state(state, db_name: str):
+    """Persist *state* to disk, choosing the method by file extension.
+
+    * ``.csv`` → ``state.to_csv(db_name)``  (no reload)
+    * anything else (e.g. ``.db``, ``.sqlite``) → ``state.save(db_name)``
+      followed by a ``State.load(db_name)`` so that rows written by other
+      processes are picked up.
+
+    Returns:
+        The (possibly reloaded) ``State``.
+    """
+    from .state import State
+
+    ext = os.path.splitext(db_name)[1].lower()
+    if ext == ".csv":
+        state.to_csv(db_name)
+    else:
+        state.save(db_name)
+        state = State.load(db_name, Y_scaler=state.Y_scaler)
+    return state
+
+
+# ---------------------------------------------------------------------------
+# Deprecated standalone sampling helpers
+# ---------------------------------------------------------------------------
 
 
 def probabilistic_threshold_sampling(
@@ -22,90 +59,46 @@ def probabilistic_threshold_sampling(
     random_draws=None,
 ):
     """
-    Samples points using a GP surrogate and filters them probabilistically
-    based on the predicted probability of exceeding a threshold.
-
-    Parameters:
-        domain: InputDomain object
-        state: State object
-        sampler: QMC sampler (e.g. Sobol)
-        surrogate: mille-feuille-compatible surrogate (must support predict(domain, X))
-        initial_samples: number of samples to draw
-        threshold_value: threshold value to compare against
-        target_fidelity: int — selects surrogate fidelity
-        target_key: int or str — selects surrogate output
-        random_draws: optional np.ndarray of uniform(0,1) values of shape (initial_samples,)
-                      if None, will be generated internally
-
-    Returns:
-        x_all: all sampled input points (shape: NxD)
-        y_pred: np.ndarray of predicted means (selected column)
-        prob: predicted P(y > threshold) for each point
-        mask: boolean array of points that passed the stochastic filter
+    .. deprecated::
+        Use :func:`millefeuille.generators.probabilistic_threshold_filter`
+        or :class:`millefeuille.generators.ThresholdCandidateGenerator` instead.
     """
-    # Generate inputs
-    x_unit = sampler.random(initial_samples)
-    x_all = domain.inverse_transform(x_unit)
-
-    # Predict mean and std from GP
-    predictions = surrogate.predict(state, x_all)
-
-    if target_key is not None:
-        prediction = predictions[target_key]
-    else:
-        if target_fidelity is not None:
-            prediction = predictions[target_fidelity]
-        else:
-            if "mean" not in predictions.keys():
-                raise ValueError(
-                    "mean missing from predictions.keys(), did you miss target_fidelity or target_key inputs?"
-                )
-            prediction = predictions
-
-    mean, std = prediction["mean"], prediction["std"]
-
-    # Compute probability P(y > threshold)
-    mean = mean.flatten()
-    std = std.flatten()
-    prob = 1.0 - norm.cdf(threshold_value, loc=mean, scale=std)
-
-    # Generate random draws
-    if random_draws is None:
-        random_draws = np.random.rand(initial_samples)
-
-    mask = prob > random_draws
-    y_pred = mean
-
-    return x_all, y_pred, prob, mask
+    warnings.warn(
+        "probabilistic_threshold_sampling is deprecated — use "
+        "millefeuille.generators.probabilistic_threshold_filter or "
+        "ThresholdCandidateGenerator instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return probabilistic_threshold_filter(
+        domain=domain,
+        state=state,
+        sampler=sampler,
+        surrogate=surrogate,
+        pool_size=initial_samples,
+        threshold_value=threshold_value,
+        target_fidelity=target_fidelity,
+        target_key=target_key,
+        random_draws=random_draws,
+    )
 
 
 def surrogate_threshold_sampling(
     domain, state, sampler, surrogate, initial_samples, surrogate_threshold, target_fidelity=None, target_key=None
 ):
     """
-    Draws samples from the sampler, evaluates the surrogate model,
-    and selects those above a specified threshold.
-
-    Parameters:
-        domain: InputDomain object
-        state: State object
-        sampler: QMC sampler (e.g., Sobol)
-        surrogate: mille-feuille-style surrogate with .predict(domain, Xs) method
-        initial_samples: int, number of candidate points
-        surrogate_threshold: float, threshold to apply on predicted mean
-        target_fidelity: int — selects surrogate fidelity
-        target_key: int or str — selects surrogate output
-
-    Returns:
-        x_all: np.ndarray of all candidate input samples
-        y_pred: np.ndarray of predicted means (selected column)
-        mask: np.ndarray of boolean values where prediction > threshold
+    .. deprecated::
+        Use :class:`millefeuille.generators.SurrogateThresholdCandidateGenerator`
+        instead.
     """
-    # Draw samples in unit hypercube, transform to input space
+    warnings.warn(
+        "surrogate_threshold_sampling is deprecated — use SurrogateThresholdCandidateGenerator instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     x_unit = sampler.random(initial_samples)
     x_all = domain.inverse_transform(x_unit)
 
-    # Predict mean and std from GP
     predictions = surrogate.predict(state, x_all)
 
     if target_key is not None:
@@ -121,11 +114,77 @@ def surrogate_threshold_sampling(
             prediction = predictions
 
     mean = prediction["mean"]
-
     y_pred = mean
     mask = mean > surrogate_threshold
 
     return x_all, y_pred, mask
+
+
+def probabilistic_threshold_sampling_with_exclusion(
+    domain,
+    state,
+    sampler,
+    surrogate,
+    initial_samples,
+    threshold_value,
+    batch_size,
+    rejection_radius,
+    n_clusters=1,
+    target_fidelity=None,
+    target_key=None,
+    random_draws=None,
+):
+    """
+    .. deprecated::
+        Use :class:`millefeuille.generators.ThresholdExclusionGenerator` or
+        compose :class:`~millefeuille.generators.ThresholdCandidateGenerator`
+        with :class:`~millefeuille.generators.GreedyExclusionGenerator` instead.
+    """
+    warnings.warn(
+        "probabilistic_threshold_sampling_with_exclusion is deprecated — use "
+        "ThresholdExclusionGenerator or compose ThresholdCandidateGenerator "
+        "with GreedyExclusionGenerator instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    import numpy as np
+
+    x_all, y_pred, prob, mask = probabilistic_threshold_filter(
+        domain=domain,
+        state=state,
+        sampler=sampler,
+        surrogate=surrogate,
+        pool_size=initial_samples,
+        threshold_value=threshold_value,
+        target_fidelity=target_fidelity,
+        target_key=target_key,
+        random_draws=random_draws,
+    )
+
+    x_candidates = x_all[mask]
+    y_candidates = y_pred[mask]
+    prob_candidates = prob[mask]
+
+    if len(x_candidates) == 0:
+        return x_candidates, y_candidates, prob_candidates
+
+    # Sort by descending probability then apply exclusion
+    order = np.argsort(-prob_candidates)
+    x_sorted = x_candidates[order]
+    y_sorted = y_candidates[order]
+    prob_sorted = prob_candidates[order]
+
+    selected_idx = greedy_exclusion(x_sorted, batch_size, rejection_radius, n_clusters)
+
+    if len(selected_idx) == 0:
+        return np.empty((0, x_all.shape[1])), np.empty(0), np.empty(0)
+
+    return x_sorted[selected_idx], y_sorted[selected_idx], prob_sorted[selected_idx]
+
+
+# ---------------------------------------------------------------------------
+# Loop runners
+# ---------------------------------------------------------------------------
 
 
 def run_Bayesian_optimiser(
@@ -136,7 +195,7 @@ def run_Bayesian_optimiser(
     surrogate,
     simulator,
     scheduler=None,
-    csv_name=None,
+    db_name=None,
     verbose=False,
     **kwargs,
 ):
@@ -145,19 +204,76 @@ def run_Bayesian_optimiser(
         raise Exception
     assert isinstance(surrogate, BaseSurrogate)
 
+    generator = BayesianOptimisationGenerator(
+        domain=state.input_domain,
+        surrogate=surrogate,
+        generate_acq_fn=generate_acq_function,
+        refit_surrogate=True,
+        verbose=verbose,
+        **kwargs,
+    )
+
+    return run_generator_loop(
+        Nsamples=Nsamples,
+        batch_size=batch_size,
+        generate_candidates=generator,
+        state=state,
+        simulator=simulator,
+        scheduler=scheduler,
+        db_name=db_name,
+    )
+
+
+def run_generator_loop(
+    Nsamples,
+    batch_size,
+    generate_candidates,
+    state,
+    simulator,
+    scheduler=None,
+    db_name=None,
+):
+    """Synchronous generate-evaluate loop with a pluggable candidate generator.
+
+    Generalises ``run_Bayesian_optimiser`` to accept any ``CandidateGenerator``
+    instance or plain callable.  Each iteration generates *batch_size*
+    candidates, evaluates them with the simulator, and updates the state.
+
+    Parameters:
+        Nsamples:           Number of generate-evaluate iterations.
+        batch_size:         Candidates requested per iteration.
+        generate_candidates:
+            A ``CandidateGenerator`` instance or a callable with signature::
+
+                generate_candidates(state, n) -> (indices, Xs, Ss | None)
+
+            * *state* — current ``State``.
+            * *n* — how many candidates are requested.
+            * Returns ``indices`` (1-D int array), ``Xs`` (N x dim),
+              and ``Ss`` (N x 1 or ``None``).
+
+            If a ``CandidateGenerator`` is passed its ``__call__`` method
+            is used directly.  A plain callable must return the same
+            3-tuple.
+        state:              Current ``State``.
+        simulator:          ``ExectuableSimulator`` or ``PythonSimulator``.
+        scheduler:          ``Scheduler`` instance (required for
+                            ``ExectuableSimulator``).
+        db_name:            Optional file path to persist state after each
+                            iteration.  Uses ``to_csv`` for ``.csv``
+                            extensions and ``save`` (SQLite) for anything
+                            else (e.g. ``.db``, ``.sqlite``).
+
+    Returns:
+        Updated ``State``.
+    """
+    if isinstance(simulator, ExectuableSimulator) and scheduler is None:
+        print("If simulator is an ExecutableSimulator, you must provide a scheduler")
+        raise Exception
+
     for _ in range(Nsamples):
-        surrogate.fit(state)
-        acq_function = generate_acq_function(surrogate, state)
+        index_next, X_next, S_next = generate_candidates(state, batch_size)
 
-        if state.l_MultiFidelity:
-            X_next, S_next = suggest_next_locations(
-                batch_size, state, acq_function=acq_function, verbose=verbose, **kwargs
-            )
-        else:
-            X_next = suggest_next_locations(batch_size, state, acq_function=acq_function, verbose=verbose, **kwargs)
-            S_next = None
-
-        index_next = state.index[-1] + np.arange(batch_size) + 1
         if isinstance(simulator, ExectuableSimulator):
             P_next, Y_next = simulator(index_next, X_next, scheduler, Ss=S_next)
         elif isinstance(simulator, PythonSimulator):
@@ -166,7 +282,7 @@ def run_Bayesian_optimiser(
             print("simulator class not recognised, inherit for mille-feuille Simulator classes...")
 
         state.update(index_next, X_next=X_next, Y_next=Y_next, P_next=P_next, S_next=S_next)
-        if csv_name is not None:
-            state.to_csv(csv_name)
+        if db_name is not None:
+            state = _persist_state(state, db_name)
 
     return state

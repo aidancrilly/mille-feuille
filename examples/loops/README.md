@@ -19,11 +19,13 @@ Provides utility functions including: reading in data and domains, and create an
 
 ###### Execution Scripts
 
+All execution scripts use `mille‑feuille`’s composable **candidate generators** to produce inputs for evaluation.  Generators are passed to `run_generator_loop` which handles the generate → evaluate → update cycle.
+
 **Initialise.py**
-Initializes the simulation process by generating a set of initial samples using a Sobol sequence, and prepares the corresponding input files for simulations. Use **PostInitialise.py** to collect data after running array job on sample input files.
+Generates a set of initial samples using `RandomCandidateGenerator` with a Sobol sampler, and prepares the corresponding input files for simulations. Use **PostInitialise.py** to collect data after running array job on sample input files.
 
 **Learning.py**
-Implements an active learning loop using a probabilistic thresholding strategy. Trains a surrogate model (Gaussian Process) and adaptively selects new samples based on prediction uncertainty and performance.
+Implements an active learning loop using `ThresholdCandidateGenerator`.  Trains a surrogate model (Gaussian Process) and adaptively selects new samples based on prediction uncertainty via `run_generator_loop`.
 
 **Optimise.py**
-Runs Bayesian optimization using the qLogExpectedImprovement acquisition function from BoTorch. Selects high-potential samples for evaluation based on the current surrogate model and updates the optimization state.
+Runs Bayesian optimisation using `BayesianOptimisationGenerator` with the `qLogExpectedImprovement` acquisition function from BoTorch. Uses `run_generator_loop` to iterate the surrogate-based optimisation cycle.

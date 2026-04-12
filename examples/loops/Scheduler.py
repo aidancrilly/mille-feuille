@@ -2,6 +2,8 @@ import os
 import subprocess
 
 from millefeuille.simulator import Scheduler
+
+# Import utils (N.B. local utils file, not millefeuille.utils)
 from Utils import safe_mkdir
 
 

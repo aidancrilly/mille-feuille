@@ -1,3 +1,4 @@
+import json
 from dataclasses import dataclass
 
 import numpy as np
@@ -10,10 +11,22 @@ Define the domains of the problem
 
 @dataclass
 class InputDomain:
-    """
-    Defines an input domain which can have both discrete and continuous dimensions
+    """Defines an input domain which can have both discrete and continuous dimensions.
 
-    This is scaled to the unit hypercube
+    This class represents a mixed continuous-discrete optimization domain that is scaled
+    to the unit hypercube [0, 1]^d. Continuous dimensions are specified with steps=0.0,
+    while discrete dimensions have non-zero step sizes.
+
+    Attributes:
+        dim (int): Total number of dimensions in the domain.
+        b_low (np.ndarray): Lower bounds of each dimension in real units (shape: (dim,)).
+        b_up (np.ndarray): Upper bounds of each dimension in real units (shape: (dim,)).
+        steps (np.ndarray): Step sizes for each dimension. Zero indicates continuous dimension,
+            non-zero indicates discrete dimension with that step size (shape: (dim,)).
+        discrete_indices (list): Indices of discrete dimensions (computed in __post_init__).
+        discrete_dim (int): Number of discrete dimensions (computed in __post_init__).
+        discrete_bound (list): Number of discrete levels for each discrete dimension
+            (computed in __post_init__).
     """
 
     dim: int
@@ -22,35 +35,242 @@ class InputDomain:
     steps: np.ndarray
 
     def __post_init__(self):
+        """Compute discrete dimension indices and bounds after initialization.
+
+        Sets discrete_indices, discrete_dim, and discrete_bound attributes based on
+        the steps array. Dimensions with steps[i] != 0.0 are treated as discrete.
+        """
         self.discrete_indices = [i for i in range(self.dim) if self.steps[i] != 0.0]
         self.discrete_dim = len(self.discrete_indices)
         self.discrete_bound = [int((self.b_up[i] - self.b_low[i]) / self.steps[i]) for i in self.discrete_indices]
 
     def get_bounds(self):
+        """Get the bounds of the normalized domain [0, 1]^d.
+
+        Returns:
+            np.ndarray: Shape (2, dim) array where first row is lower bounds (0.0)
+                and second row is upper bounds (1.0).
+        """
         lb = np.zeros(self.dim)
         ub = np.ones(self.dim)
         bounds = np.stack([lb, ub])
         return bounds
 
+    @classmethod
+    def read_json(cls, filepath: str) -> tuple["InputDomain", list[str]]:
+        """Create an ``InputDomain`` (or subclass) from a JSON configuration file.
+
+        The JSON file must contain a ``"params"`` object with keys
+        ``"names"``, ``"lower_bounds"``, ``"upper_bounds"`` and ``"steps"``.
+
+        Parameters:
+            filepath: Path to the JSON file.
+
+        Returns:
+            A tuple ``(domain, X_names)`` where *domain* is the constructed
+            ``InputDomain`` (or subclass) and *X_names* is the list of parameter names.
+        """
+        with open(filepath, "r") as f:
+            cfg = json.load(f)
+
+        params = cfg["params"]
+        names = params["names"]
+        b_low = np.array(params["lower_bounds"])
+        b_up = np.array(params["upper_bounds"])
+        steps = np.array(params["steps"])
+
+        domain = cls(dim=len(names), b_low=b_low, b_up=b_up, steps=steps)
+        return domain, names
+
     def transform(self, X):
+        """Transform a batch of points from real units to normalized [0, 1]^d units.
+
+        Applies transform_feature to each dimension, which handles both continuous
+        and discrete dimensions appropriately. For discrete dimensions, values are
+        assumed to already align with the discrete grid in real units.
+
+        Parameters:
+            X (np.ndarray): Points in real units, shape (n_points, dim).
+
+        Returns:
+            np.ndarray: Points in normalized [0, 1]^d units, shape (n_points, dim).
+        """
         X_scaled = X.copy()
         # Transform to [0,1]^d
         for n in range(self.dim):
-            X_scaled[:, n] = (X_scaled[:, n] - self.b_low[n]) / (self.b_up[n] - self.b_low[n])
-        # Catch floating point errors
-        X_scaled[np.isclose(X_scaled, 0.0)] = 0.0
-        X_scaled[np.isclose(X_scaled, 1.0)] = 1.0
+            X_scaled[:, n] = self.transform_feature(n, X[:, n])
         return X_scaled
 
     def inverse_transform(self, X):
+        """Transform a batch of points from normalized [0, 1]^d units to real units.
+
+        Applies inverse_transform_feature to each dimension, which handles both continuous
+        and discrete dimensions appropriately. For discrete dimensions, values are
+        snapped to the nearest discrete level after denormalization.
+
+        Parameters:
+            X (np.ndarray): Points in normalized [0, 1]^d units, shape (n_points, dim).
+
+        Returns:
+            np.ndarray: Points in real units, shape (n_points, dim).
+        """
         X_scaled = X.copy()
         # Scale back to parameter space
         for n in range(self.dim):
-            X_scaled[:, n] = (self.b_up[n] - self.b_low[n]) * X_scaled[:, n] + self.b_low[n]
-            # For discrete spaces, find nearest point
-            if n in self.discrete_indices:
-                X_scaled[:, n] = np.rint(X_scaled[:, n] / self.steps[n]) * self.steps[n]
+            X_scaled[:, n] = self.inverse_transform_feature(n, X[:, n])
         return X_scaled
+
+    def transform_feature(self, feature_index, value):
+        """Transform feature values from real units to normalized [0, 1] units.
+
+        Floating-point errors near 0.0 and 1.0 are corrected to ensure proper boundary behavior.
+
+        Parameters:
+            feature_index (int): Index of the feature dimension to transform.
+            value (float or np.ndarray): Feature value(s) in real units. Can be a scalar
+                or array; output shape matches input shape.
+
+        Returns:
+            float or np.ndarray: Normalized value(s) in [0, 1]. Shape matches input value.
+        """
+        scalar_input = np.ndim(value) == 0
+        # Scale to [0,1]
+        value = (value - self.b_low[feature_index]) / (self.b_up[feature_index] - self.b_low[feature_index])
+        # Catch floating point errors
+        value = np.where(np.isclose(value, 0.0), 0.0, value)
+        value = np.where(np.isclose(value, 1.0), 1.0, value)
+        return value if not scalar_input else value.item()
+
+    def inverse_transform_feature(self, feature_index, value):
+        """Transform feature values from normalized [0, 1] units to real units.
+
+        For discrete dimensions, values are snapped to the nearest discrete level in
+        real units after denormalization, ensuring values align with the discrete grid.
+
+        Parameters:
+            feature_index (int): Index of the feature dimension to transform.
+            value (float or np.ndarray): Normalized feature value(s) in [0, 1]. Can be a scalar
+                or array; output shape matches input shape.
+
+        Returns:
+            float or np.ndarray: Feature value(s) in real units. Shape matches input value.
+        """
+        value = (self.b_up[feature_index] - self.b_low[feature_index]) * value + self.b_low[feature_index]
+        # For discrete spaces, find nearest point.
+        if feature_index in self.discrete_indices:
+            value = np.rint(value / self.steps[feature_index]) * self.steps[feature_index]
+        return value
+
+
+@dataclass
+class ScaleFactorInputDomain(InputDomain):
+    """Defines an input domain where the first dimension is a multiplicative scale factor.
+
+    Inherits from ``InputDomain``. The first dimension (index 0) represents a scale factor
+    that is applied multiplicatively to all other dimensions after converting to physical
+    coordinates but before snapping to discrete steps.
+
+    This is useful when one parameter controls the overall magnitude of the remaining
+    parameters (e.g., a total energy or amplitude that scales all other quantities).
+
+    Attributes:
+        (inherits all attributes from InputDomain)
+    """
+
+    def transform(self, X):
+        """Transform a batch of points from real units (with scale factor) to [0, 1]^d.
+
+        Undoes the multiplicative scale factor on dimensions 1..N by dividing by the
+        physical value of dimension 0, then normalizes every dimension to [0, 1].
+
+        Parameters:
+            X (np.ndarray): Points in real units (scale factor already applied),
+                shape (n_points, dim).
+
+        Returns:
+            np.ndarray: Points in normalized [0, 1]^d units, shape (n_points, dim).
+        """
+        X_scaled = X.copy()
+        # Undo the multiplicative scale factor from dimensions 1..N
+        X_scaled[:, 1:] = X_scaled[:, 1:] / X_scaled[:, 0:1]
+        # Normalize each dimension to [0, 1]
+        for n in range(self.dim):
+            X_scaled[:, n] = super().transform_feature(n, X_scaled[:, n])
+        return X_scaled
+
+    def inverse_transform(self, X):
+        """Transform from normalized [0, 1]^d to real units with scale factor applied.
+
+        Converts all dimensions to physical coordinates, multiplies dimensions 1 to
+        ``dim-1`` by the physical value of dimension 0 (the scale factor), then snaps
+        any discrete dimensions to their grids.
+
+        Parameters:
+            X (np.ndarray): Points in normalized [0, 1]^d units, shape (n_points, dim).
+
+        Returns:
+            np.ndarray: Points in real units with scale factor applied, shape (n_points, dim).
+        """
+        X_scaled = X.copy()
+        # Convert all dimensions to physical coordinates (without discrete snapping yet)
+        for n in range(self.dim):
+            X_scaled[:, n] = (self.b_up[n] - self.b_low[n]) * X[:, n] + self.b_low[n]
+        # Apply scale factor (dim 0) multiplicatively to dimensions 1..N
+        X_scaled[:, 1:] *= X_scaled[:, 0:1]
+        # Snap discrete dimensions to their grids
+        for n in self.discrete_indices:
+            X_scaled[:, n] = np.rint(X_scaled[:, n] / self.steps[n]) * self.steps[n]
+        return X_scaled
+
+    def transform_feature(self, feature_index, value, scale_factor=None):
+        """Transform a feature value from real units to normalized [0, 1].
+
+        For dimension 0 (the scale factor itself) the transform is the standard
+        linear normalization.  For dimensions 1..N, if *scale_factor* is supplied
+        the value is first divided by it to undo the multiplicative coupling before
+        normalization.
+
+        Parameters:
+            feature_index (int): Index of the feature dimension.
+            value (float or np.ndarray): Feature value(s) in real units.
+            scale_factor (float or np.ndarray or None): Physical scale factor
+                value(s) used to undo the multiplicative scaling for features > 0.
+                Ignored for feature 0.
+
+        Returns:
+            float or np.ndarray: Normalized value(s) in [0, 1].
+        """
+        if feature_index > 0 and scale_factor is not None:
+            value = value / scale_factor
+        return super().transform_feature(feature_index, value)
+
+    def inverse_transform_feature(self, feature_index, value, scale_factor=None):
+        """Transform a feature value from normalized [0, 1] to real units.
+
+        The value is first denormalized to the physical range.  For dimensions
+        1..N, if *scale_factor* is supplied the denormalized value is multiplied
+        by it to apply the multiplicative coupling.  Discrete dimensions are then
+        snapped to their grid.
+
+        Parameters:
+            feature_index (int): Index of the feature dimension.
+            value (float or np.ndarray): Normalized feature value(s) in [0, 1].
+            scale_factor (float or np.ndarray or None): Physical scale factor
+                value(s) to apply multiplicatively for features > 0.
+                Ignored for feature 0.
+
+        Returns:
+            float or np.ndarray: Feature value(s) in real units.
+        """
+        # Denormalize from [0, 1] to the unscaled physical range
+        value = (self.b_up[feature_index] - self.b_low[feature_index]) * value + self.b_low[feature_index]
+        # Apply the multiplicative scale factor for features > 0
+        if feature_index > 0 and scale_factor is not None:
+            value = value * scale_factor
+        # Snap discrete dimensions to their grid
+        if feature_index in self.discrete_indices:
+            value = np.rint(value / self.steps[feature_index]) * self.steps[feature_index]
+        return value
 
 
 @dataclass

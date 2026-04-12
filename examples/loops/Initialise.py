@@ -1,6 +1,9 @@
+import millefeuille as mf
 import numpy as np
 from scipy.stats.qmc import Sobol
 from Simulator import Simulator
+
+# Import utils (N.B. local utils file, not millefeuille.utils)
 from Utils import read_domainfile
 
 EXECUTABLE = "path_to_your_executable"
@@ -22,10 +25,17 @@ if __name__ == "__main__":
     if current_iter > 0:
         _ = sampler.fast_forward(current_iter)
 
-    # Get sample
+    # ---- Use a RandomCandidateGenerator to draw the initial sample ----
+    generator = mf.RandomCandidateGenerator(domain=domain, sampler=sampler)
+
     log2sample = int(np.ceil(np.log2(initial_samples)))
-    X_next = sampler.random_base2(m=log2sample)
-    X_next = domain.inverse_transform(X_next)
+    n_initial = 2**log2sample
+    index_next, X_next, _ = generator(
+        # A minimal State with no data yet
+        mf.State(input_domain=domain, index=np.array([-1])),
+        n_initial,
+    )
+    index_next = np.arange(current_iter, current_iter + n_initial)
 
     # Execution
     base_paths = {
@@ -39,7 +49,6 @@ if __name__ == "__main__":
     # Initialise simulator
     batched_simulator = Simulator(base_paths, io_params)
 
-    index_next = np.arange(current_iter, current_iter + initial_samples)
     batched_simulator.prepare_inputs(index_next, X_next)
 
     #############################################################################

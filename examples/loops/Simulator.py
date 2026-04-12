@@ -5,6 +5,8 @@ import f90nml
 import numpy as np
 import pandas as pd
 from millefeuille.simulator import ExectuableSimulator
+
+# Import utils (N.B. local utils file, not millefeuille.utils)
 from Utils import safe_mkdir
 
 
