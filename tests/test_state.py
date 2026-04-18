@@ -18,6 +18,136 @@ def make_simple_state(n=5, index_start=0):
     return State(ForresterDomain, Is, Xs, Ys)
 
 
+def make_multifidelity_state():
+    """Create a state with 6 LF (s=0) and 4 HF (s=1) rows."""
+    n = 10
+    Is = np.arange(n, dtype=float)
+    Xs = np.random.rand(n, 1)
+    Ys = np.random.rand(n, 1)
+    Ps = np.random.rand(n, 2)
+    Ss = np.array([[0], [0], [0], [1], [1], [0], [0], [1], [1], [0]], dtype=float)
+    return State(ForresterDomain, Is, Xs, Ys, Ps=Ps, Ss=Ss)
+
+
+# ---------------------------------------------------------------------------
+# filter / filter_by_fidelity tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_filter_preserves_all_columns():
+    state = make_multifidelity_state()
+    mask = state.Ss[:, 0] == 0
+    filtered = state.filter(mask)
+    assert filtered.Xs.shape[0] == mask.sum()
+    assert filtered.Ys.shape[0] == mask.sum()
+    assert filtered.Ps.shape[0] == mask.sum()
+    assert filtered.Ss.shape[0] == mask.sum()
+    assert filtered.index.shape[0] == mask.sum()
+
+
+@pytest.mark.unit
+def test_filter_by_fidelity_basic_split():
+    state = make_multifidelity_state()
+    lf = state.filter_by_fidelity(0)
+    hf = state.filter_by_fidelity(1)
+    assert lf.Xs.shape[0] == 6
+    assert hf.Xs.shape[0] == 4
+    assert lf.Ss is None
+    assert hf.Ss is None
+    assert lf.S_names is None
+    assert hf.fidelity_domain is None
+
+
+@pytest.mark.unit
+def test_filter_by_fidelity_empty_result():
+    state = make_multifidelity_state()
+    empty = state.filter_by_fidelity(99)
+    assert empty.index is None
+    assert empty.Xs is None
+    assert empty.Ys is None
+    assert empty.Ps is None
+
+
+@pytest.mark.unit
+def test_filter_by_fidelity_no_Ps():
+    n = 5
+    Is = np.arange(n, dtype=float)
+    Xs = np.random.rand(n, 1)
+    Ys = np.random.rand(n, 1)
+    Ss = np.array([[0], [1], [0], [1], [0]], dtype=float)
+    state = State(ForresterDomain, Is, Xs, Ys, Ss=Ss)
+    lf = state.filter_by_fidelity(0)
+    assert lf.Xs.shape[0] == 3
+    assert lf.Ps is None
+
+
+@pytest.mark.unit
+def test_filter_by_fidelity_no_Ss_raises():
+    state = make_simple_state()
+    with pytest.raises(ValueError, match="no fidelity column"):
+        state.filter_by_fidelity(0)
+
+
+# ---------------------------------------------------------------------------
+# State.load with default_Ss
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_load_default_Ss_creates_column():
+    state = make_simple_state(n=5)
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+        fname = tmp.name
+    try:
+        os.remove(fname)
+        state.save(fname)
+        loaded = State.load(fname, default_Ss=0)
+        assert loaded.Ss is not None
+        assert loaded.Ss.shape == (5, 1)
+        np.testing.assert_array_equal(loaded.Ss, np.zeros((5, 1)))
+        assert loaded.S_names == ["fidelity"]
+    finally:
+        if os.path.exists(fname):
+            os.remove(fname)
+
+
+@pytest.mark.unit
+def test_load_default_Ss_noop_when_Ss_exists():
+    n = 5
+    Is = np.arange(n, dtype=float)
+    Xs = np.random.rand(n, 1)
+    Ys = np.random.rand(n, 1)
+    Ss = np.ones((n, 1))
+    state = State(ForresterDomain, Is, Xs, Ys, Ss=Ss, S_names=["s_0"])
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+        fname = tmp.name
+    try:
+        os.remove(fname)
+        state.save(fname)
+        loaded = State.load(fname, default_Ss=0)
+        np.testing.assert_array_almost_equal(loaded.Ss, Ss)
+        assert loaded.S_names == ["s_0"]
+    finally:
+        if os.path.exists(fname):
+            os.remove(fname)
+
+
+@pytest.mark.unit
+def test_load_without_default_Ss_unchanged():
+    state = make_simple_state(n=5)
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+        fname = tmp.name
+    try:
+        os.remove(fname)
+        state.save(fname)
+        loaded = State.load(fname)
+        assert loaded.Ss is None
+    finally:
+        if os.path.exists(fname):
+            os.remove(fname)
+
+
 @pytest.mark.unit
 def test_to_csv_creates_file():
     state = make_simple_state(n=5)
