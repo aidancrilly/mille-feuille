@@ -657,7 +657,7 @@ class State:
                     state.Ss = np.full((len(state.index), 1), default_Ss, dtype=float)
                     state.S_names = ["fidelity"]
                 elif state.Ss is not None:
-                    warnings.warn("default_Ss ignored: loaded State already has Ss", RuntimeWarning, stacklevel=2)
+                    warnings.warn("default_Ss ignored: loaded State already has Ss", UserWarning, stacklevel=2)
 
             return state
         finally:
