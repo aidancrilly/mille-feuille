@@ -1,7 +1,7 @@
 import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Sequence, Union
+from typing import Sequence
 
 import numpy as np
 import numpy.typing as npt
@@ -39,7 +39,7 @@ class Scheduler(ABC):
     """
 
     @staticmethod
-    def _normalise_nprocs(nprocs: Union[int, list[int]], n_jobs: int) -> list[int]:
+    def _normalise_nprocs(nprocs: int | list[int], n_jobs: int) -> list[int]:
         """Broadcast or validate *nprocs* to a per-job list.
 
         Parameters
@@ -62,13 +62,11 @@ class Scheduler(ABC):
             return [int(nprocs)] * n_jobs
         nprocs_list = list(nprocs)
         if len(nprocs_list) != n_jobs:
-            raise ValueError(
-                f"len(nprocs) = {len(nprocs_list)} but {n_jobs} jobs were provided"
-            )
+            raise ValueError(f"len(nprocs) = {len(nprocs_list)} but {n_jobs} jobs were provided")
         return nprocs_list
 
     @abstractmethod
-    def launch_jobs(self, exe: str, nprocs: Union[int, list[int]], inputs: Sequence, indices: Sequence[str]):
+    def launch_jobs(self, exe: str, nprocs: int | list[int], inputs: Sequence, indices: Sequence[str]):
         """
         Launches simulation jobs in parallel.
 
