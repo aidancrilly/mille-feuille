@@ -793,7 +793,7 @@ def greedy_exclusion(
 
     # PCA-normalise within each cluster; store transforms for existing points
     x_normalised = np.empty_like(x_candidates)
-    cluster_transforms = {}  # k -> ('std', mean, scale) | ('pca', mean, eigenvectors, eigenvalues)
+    cluster_transforms = {}  # k -> ('std', mean, std) | ('pca', mean, eigenvectors, eigenvalues)
     for k in range(n_clusters_actual):
         cluster_mask = labels == k
         x_cluster = x_candidates[cluster_mask]
@@ -821,8 +821,6 @@ def greedy_exclusion(
 
     if x_existing is not None and len(x_existing) > 0:
         if n_clusters_actual > 1:
-            from scipy.cluster.vq import vq
-
             existing_labels, _ = vq(x_existing, centroids)
         else:
             existing_labels = np.zeros(len(x_existing), dtype=int)
@@ -832,8 +830,8 @@ def greedy_exclusion(
                 continue
             transform = cluster_transforms[label_e]
             if transform[0] == "std":
-                _, mean, scale = transform
-                x_e_norm = (x_e - mean) / scale
+                _, mean, std = transform
+                x_e_norm = (x_e - mean) / std
             else:
                 _, mean, eigenvectors, eigenvalues = transform
                 x_e_norm = (x_e - mean) @ eigenvectors / np.sqrt(eigenvalues)
