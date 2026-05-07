@@ -504,6 +504,11 @@ class GreedyExclusionGenerator(CandidateGenerator):
         pool_multiplier:     How many multiples of ``n_candidates`` to
                              request from *inner* (default 4).
         n_clusters:          Number of clusters for PCA analysis (default 1).
+        exclude_existing:    If ``True``, existing points in ``state.Xs``
+                             are used as additional exclusion anchors so
+                             that no new candidate is placed within
+                             *rejection_radius* of an already-evaluated
+                             point (default ``False``).
     """
 
     def __init__(
@@ -512,12 +517,14 @@ class GreedyExclusionGenerator(CandidateGenerator):
         rejection_radius: float,
         pool_multiplier: int = 4,
         n_clusters: int = 1,
+        exclude_existing: bool = False,
     ):
         super().__init__(inner.domain)
         self.inner = inner
         self.rejection_radius = rejection_radius
         self.pool_multiplier = pool_multiplier
         self.n_clusters = n_clusters
+        self.exclude_existing = exclude_existing
 
     def generate(self, state, n_candidates):
         pool_request = n_candidates * self.pool_multiplier
@@ -529,7 +536,8 @@ class GreedyExclusionGenerator(CandidateGenerator):
         if len(Xs) <= n_candidates:
             return Xs, Ss
 
-        selected_idx = greedy_exclusion(Xs, n_candidates, self.rejection_radius, self.n_clusters)
+        x_existing = state.Xs if self.exclude_existing else None
+        selected_idx = greedy_exclusion(Xs, n_candidates, self.rejection_radius, self.n_clusters, x_existing)
 
         if len(selected_idx) == 0:
             return Xs[:n_candidates], Ss[:n_candidates] if Ss is not None else None
@@ -580,6 +588,11 @@ class ThresholdExclusionGenerator(CandidateGenerator):
                              (default 5).
         pool_try_multiplier: Factor by which the pool size grows on each
                              retry (default 2).
+        exclude_existing:    If ``True``, existing points in ``state.Xs``
+                             are used as additional exclusion anchors so
+                             that no new candidate is placed within
+                             *rejection_radius* of an already-evaluated
+                             point (default ``False``).
     """
 
     def __init__(
@@ -599,6 +612,7 @@ class ThresholdExclusionGenerator(CandidateGenerator):
         max_retries: int = 5,
         pool_try_multiplier: int = 2,
         rng: np.random.Generator | None = None,
+        exclude_existing: bool = False,
     ):
         super().__init__(domain)
         self.sampler = sampler
@@ -615,11 +629,13 @@ class ThresholdExclusionGenerator(CandidateGenerator):
         self.max_retries = max_retries
         self.pool_try_multiplier = pool_try_multiplier
         self._rng = rng or np.random.default_rng()
+        self.exclude_existing = exclude_existing
 
     def generate(self, state, n_candidates):
         if self.refit_surrogate:
             self.surrogate.fit(state)
 
+        x_existing = state.Xs if self.exclude_existing else None
         current_pool = self.pool_size
         for attempt in range(1 + self.max_retries):
             x_all, y_pred, prob, mask = probabilistic_threshold_filter(
@@ -644,7 +660,9 @@ class ThresholdExclusionGenerator(CandidateGenerator):
                 order = np.argsort(-prob_candidates)
                 x_candidates = x_candidates[order]
 
-            selected_idx = greedy_exclusion(x_candidates, n_candidates, self.rejection_radius, self.n_clusters)
+            selected_idx = greedy_exclusion(
+                x_candidates, n_candidates, self.rejection_radius, self.n_clusters, x_existing
+            )
 
             if len(selected_idx) >= n_candidates:
                 Xs = x_candidates[selected_idx]
@@ -739,6 +757,7 @@ def greedy_exclusion(
     batch_size,
     rejection_radius,
     n_clusters=1,
+    x_existing=None,
 ):
     """Greedy selection with PCA-normalised proximity exclusion.
 
@@ -751,6 +770,11 @@ def greedy_exclusion(
         batch_size:       Maximum number of points to select.
         rejection_radius: Minimum distance in PCA-normalised space.
         n_clusters:       Number of clusters for PCA analysis (default 1).
+        x_existing:       Optional array ``(M, dim)`` of already-evaluated
+                          points.  These are projected into the same
+                          PCA-normalised space and used as initial exclusion
+                          anchors, so that no new candidate is selected
+                          within *rejection_radius* of an existing point.
 
     Returns:
         selected_indices: 1-D integer array of indices into *x_candidates*.
@@ -759,15 +783,17 @@ def greedy_exclusion(
 
     n_clusters_actual = min(n_clusters, n_candidates)
     if n_clusters_actual > 1:
-        from scipy.cluster.vq import kmeans2
+        from scipy.cluster.vq import kmeans2, vq
 
-        _, labels = kmeans2(x_candidates, n_clusters_actual, minit="points", seed=0)
+        centroids, labels = kmeans2(x_candidates, n_clusters_actual, minit="points", seed=0)
     else:
+        centroids = None
         labels = np.zeros(n_candidates, dtype=int)
         n_clusters_actual = 1
 
-    # PCA-normalise within each cluster
+    # PCA-normalise within each cluster; store transforms for existing points
     x_normalised = np.empty_like(x_candidates)
+    cluster_transforms = {}  # k -> ('std', mean, scale) | ('pca', mean, eigenvectors, eigenvalues)
     for k in range(n_clusters_actual):
         cluster_mask = labels == k
         x_cluster = x_candidates[cluster_mask]
@@ -782,15 +808,39 @@ def greedy_exclusion(
             std = x_centered.std(axis=0)
             std = np.where(std > 0, std, 1.0)
             x_normalised[cluster_mask] = x_centered / std
+            cluster_transforms[k] = ("std", mean, std)
         else:
             cov = np.cov(x_centered.T)
             eigenvalues, eigenvectors = np.linalg.eigh(cov)
             eigenvalues = np.maximum(eigenvalues, 1e-10)
             x_normalised[cluster_mask] = x_centered @ eigenvectors / np.sqrt(eigenvalues)
+            cluster_transforms[k] = ("pca", mean, eigenvectors, eigenvalues)
+
+    # Initialise per-cluster exclusion lists, pre-populated with existing points
+    selected_normalised_per_cluster = {k: [] for k in range(n_clusters_actual)}
+
+    if x_existing is not None and len(x_existing) > 0:
+        if n_clusters_actual > 1:
+            from scipy.cluster.vq import vq
+
+            existing_labels, _ = vq(x_existing, centroids)
+        else:
+            existing_labels = np.zeros(len(x_existing), dtype=int)
+
+        for x_e, label_e in zip(x_existing, existing_labels):
+            if label_e not in cluster_transforms:
+                continue
+            transform = cluster_transforms[label_e]
+            if transform[0] == "std":
+                _, mean, scale = transform
+                x_e_norm = (x_e - mean) / scale
+            else:
+                _, mean, eigenvectors, eigenvalues = transform
+                x_e_norm = (x_e - mean) @ eigenvectors / np.sqrt(eigenvalues)
+            selected_normalised_per_cluster[label_e].append(x_e_norm)
 
     # Greedy selection in given order
     selected_indices = []
-    selected_normalised_per_cluster = {k: [] for k in range(n_clusters_actual)}
 
     for idx in range(n_candidates):
         if len(selected_indices) >= batch_size:
