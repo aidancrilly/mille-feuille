@@ -11,6 +11,7 @@
 Used in the following publications:
 
 - [Automated simulation-based design via multi-fidelity active learning and optimisation for laser direct drive implosions, Crilly et al.](https://arxiv.org/abs/2508.20878)
+- [Fusion alpha particle momentum deposition in thermonuclear burn dynamics](https://pubs.aip.org/aip/pop/article/33/5/050702/3388847/Fusion-alpha-particle-momentum-deposition-in)
 
 ---
 
