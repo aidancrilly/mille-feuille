@@ -101,6 +101,7 @@ Base generators produce candidates from scratch:
 | `BayesianOptimisationGenerator` | Surrogate + acquisition-function optimisation |
 | `ThresholdCandidateGenerator` | Probabilistic threshold sampling (draws pool → surrogate prediction → stochastic filter) |
 | `SurrogateThresholdCandidateGenerator` | Deterministic surrogate threshold sampling (predicted mean > threshold) |
+| `MetropolisHastingsGenerator` | Markov Chain random walk initialised from state with Metropolis-Hastings acceptance criterion |
 
 #### Wrapper generators
 

@@ -1,4 +1,5 @@
 import os
+import time
 import warnings
 
 from .generators import BayesianOptimisationGenerator, greedy_exclusion, probabilistic_threshold_filter
@@ -232,6 +233,7 @@ def run_generator_loop(
     simulator,
     scheduler=None,
     db_name=None,
+    verbose=False,
 ):
     """Synchronous generate-evaluate loop with a pluggable candidate generator.
 
@@ -263,6 +265,7 @@ def run_generator_loop(
                             iteration.  Uses ``to_csv`` for ``.csv``
                             extensions and ``save`` (SQLite) for anything
                             else (e.g. ``.db``, ``.sqlite``).
+        verbose:            If ``True``, prints progress messages.
 
     Returns:
         Updated ``State``.
@@ -271,8 +274,24 @@ def run_generator_loop(
         print("If simulator is an ExecutableSimulator, you must provide a scheduler")
         raise Exception
 
-    for _ in range(Nsamples):
+    if verbose:
+        print(
+            f"Starting generate-evaluate loop: {Nsamples} iterations, \n"
+            f"batch size {batch_size}, total candidates {Nsamples * batch_size}, \n"
+            f"simulator type {type(simulator).__name__},\n"
+            f"generator type {type(generate_candidates).__name__}."
+        )
+
+    for isample in range(Nsamples):
+        if verbose:
+            print(f"=== Sample {isample + 1} / {Nsamples} ===")
+            start = time.time()
+            gen_start = time.time()
+
         index_next, X_next, S_next = generate_candidates(state, batch_size)
+        if verbose:
+            gen_time = time.time() - gen_start
+            print(f"Generated candidates in {gen_time:.2f} seconds.")
 
         if isinstance(simulator, ExectuableSimulator):
             P_next, Y_next = simulator(index_next, X_next, scheduler, Ss=S_next)
@@ -280,6 +299,12 @@ def run_generator_loop(
             P_next, Y_next = simulator(index_next, X_next, Ss=S_next)
         else:
             print("simulator class not recognised, inherit for mille-feuille Simulator classes...")
+
+        if verbose:
+            sim_time = time.time() - gen_start - gen_time
+            total_time = time.time() - start
+            print(f"Simulated candidates in {sim_time:.2f} seconds.")
+            print(f"Total iteration time: {total_time:.2f} seconds.")
 
         state.update(index_next, X_next=X_next, Y_next=Y_next, P_next=P_next, S_next=S_next)
         if db_name is not None:

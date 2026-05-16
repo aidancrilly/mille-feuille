@@ -15,6 +15,7 @@ Generators fall into two categories:
     ``BayesianOptimisationGenerator``         — surrogate + acquisition
     ``ThresholdCandidateGenerator``           — probabilistic threshold sampling
     ``SurrogateThresholdCandidateGenerator``  — deterministic surrogate threshold
+    ``MetropolisHastingsGenerator``           — MCMC chain sampling via surrogate posterior
 
 *Wrapper generators* refine the output of another generator:
     ``GreedyExclusionGenerator``             — proximity-based exclusion
@@ -668,6 +669,189 @@ class ThresholdExclusionGenerator(CandidateGenerator):
         fids = list(self.fidelity_probs.keys())
         probs = list(self.fidelity_probs.values())
         return self._rng.choice(fids, size=(n, 1), p=probs)
+
+
+# ---------------------------------------------------------------------------
+# Metropolis-Hastings MCMC candidate generator
+# ---------------------------------------------------------------------------
+
+
+class MetropolisHastingsGenerator(CandidateGenerator):
+    """MCMC candidate generator using a Metropolis-Hastings random walk.
+
+    Runs ``n_chains`` independent Markov chains, each seeded from the last
+    ``n_chains`` observed points in *state* (sorted by observation order).
+    Proposals are Gaussian random walks in the **unit-cube** (transformed)
+    space, clamped to ``[0, 1]^d`` before back-transforming.
+
+    The acceptance test is Thompson-sampling style: for both the current
+    and proposed point a scalar score is drawn from
+    ``N(mean(x), std(x)^2)`` using the surrogate posterior.  The proposal
+    is accepted with probability
+
+    .. math::
+
+        \\alpha = \\min\\!\\left(1,\\; \\exp(f' - f)\\right)
+
+    so the chain drifts towards regions of higher predicted value.
+
+    After ``n_burnin`` warm-up steps, the chains collect samples.  The
+    total pool across all chains is randomly thinned to return exactly
+    ``n_candidates`` points.
+
+    Parameters:
+        domain:          ``InputDomain``.
+        surrogate:       Surrogate model instance.
+        proposal_std:    Standard deviation of the Gaussian proposal in
+                         unit-cube space (default ``0.05``).
+        n_burnin:        Number of burn-in steps discarded per chain
+                         (default ``50``).
+        n_steps:         Number of post-burn-in steps collected per chain
+                         (default ``200``).  Total pool size is
+                         ``n_chains * n_steps``; must be ``>= n_candidates``.
+        n_chains:        Number of independent chains (default ``4``).
+        refit_surrogate: Refit surrogate before running chains (default
+                         ``True``).
+        target_fidelity: Selects a fidelity key from the surrogate
+                         ``predict`` output dict (optional).
+        target_key:      Selects an output key from the surrogate
+                         ``predict`` output dict (optional).
+        rng:             ``np.random.Generator`` (optional).
+    """
+
+    def __init__(
+        self,
+        domain: InputDomain,
+        surrogate: BaseSurrogate,
+        proposal_std: float = 0.05,
+        n_burnin: int = 0,
+        n_steps: int = 20,
+        n_chains: int = 4,
+        refit_surrogate: bool = True,
+        target_fidelity: int | None = None,
+        target_key=None,
+        rng: np.random.Generator | None = None,
+    ):
+        super().__init__(domain)
+        self.surrogate = surrogate
+        self.proposal_std = proposal_std
+        self.n_burnin = n_burnin
+        self.n_steps = n_steps
+        self.n_chains = n_chains
+        self.refit_surrogate = refit_surrogate
+        self.target_fidelity = target_fidelity
+        self.target_key = target_key
+        self._rng = rng or np.random.default_rng()
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _score_batch(self, state: State, x_raw: npt.NDArray) -> npt.NDArray:
+        """Draw Thompson sample scores for a batch of points.
+
+        Parameters:
+            state: Current optimisation state.
+            x_raw: Raw (un-transformed) inputs of shape ``(N, dim)``.
+
+        Returns:
+            Float array of shape ``(N,)`` drawn from
+            ``N(mean(x_i), std(x_i)^2)`` independently per point.
+        """
+        predictions = self.surrogate.predict(state, x_raw)
+
+        if self.target_key is not None:
+            pred = predictions[self.target_key]
+        elif self.target_fidelity is not None:
+            pred = predictions[self.target_fidelity]
+        else:
+            pred = predictions
+
+        mean = pred["mean"].flatten()
+        std = np.maximum(pred["std"].flatten(), 0.0)
+        return self._rng.normal(mean, std)
+
+    def _seed_points_unit(self, state: State) -> npt.NDArray:
+        """Return ``n_chains`` seed points in unit-cube space.
+
+        Uses the last ``n_chains`` observed inputs from *state*
+        (by position in the array, i.e. most recently appended).
+        Falls back to uniform random if the state has fewer points
+        than ``n_chains``.
+
+        Returns:
+            Array of shape ``(n_chains, dim)``.
+        """
+        if state.Xs is not None and len(state.Xs) >= self.n_chains:
+            seeds_raw = state.Xs[-self.n_chains :]
+        elif state.Xs is not None and len(state.Xs) > 0:
+            # Fewer observed points than chains — tile up to n_chains
+            repeats = int(np.ceil(self.n_chains / len(state.Xs)))
+            seeds_raw = np.tile(state.Xs, (repeats, 1))[: self.n_chains]
+        else:
+            # No observations yet — uniform random seeds
+            seeds_raw = self.domain.inverse_transform(self._rng.uniform(size=(self.n_chains, self.domain.dim)))
+
+        # Transform to unit-cube space for proposals
+        return state.transform_X(seeds_raw)
+
+    # ------------------------------------------------------------------
+    # CandidateGenerator interface
+    # ------------------------------------------------------------------
+
+    def generate(self, state: State, n_candidates: int) -> tuple[npt.NDArray, None]:
+        pool_size = self.n_chains * self.n_steps
+        if pool_size < n_candidates:
+            raise ValueError(
+                f"MetropolisHastingsGenerator: pool size (n_chains={self.n_chains} * "
+                f"n_steps={self.n_steps} = {pool_size}) must be >= "
+                f"n_candidates={n_candidates}."
+            )
+
+        if self.refit_surrogate:
+            self.surrogate.fit(state)
+
+        # x_unit / x_raw carry the state of all chains simultaneously
+        x_unit = self._seed_points_unit(state)  # (n_chains, dim)
+        x_raw = self.domain.inverse_transform(x_unit)  # (n_chains, dim)
+        f_current = self._score_batch(state, x_raw)  # (n_chains,)
+
+        collected: list[npt.NDArray] = []
+        total_steps = self.n_burnin + self.n_steps
+
+        for step in range(total_steps):
+            # Propose for all chains, rejecting out-of-bounds proposals
+            noise = self._rng.normal(0.0, self.proposal_std, size=(self.n_chains, self.domain.dim))
+            x_unit_proposed = x_unit + noise
+            # Out of bounds check
+            out_of_bounds = np.any(x_unit_proposed < 0.0, axis=1) | np.any(x_unit_proposed > 1.0, axis=1)  # (n_chains,)
+            if np.all(out_of_bounds):
+                # All proposals out of bounds — skip this step
+                continue
+
+            # Only compute the following for in-bounds proposals; keep the rest as the current point
+            x_unit_proposed[out_of_bounds] = x_unit[out_of_bounds]
+            x_raw_proposed = self.domain.inverse_transform(x_unit_proposed)
+
+            # Score all proposals in a single batched surrogate call
+            f_proposed = np.where(out_of_bounds, -np.inf, self._score_batch(state, x_raw_proposed))  # (n_chains,)
+
+            # Vectorised MH acceptance
+            alpha = f_proposed / f_current
+            accept = (alpha >= 1.0) | (self._rng.uniform(size=self.n_chains) < alpha)  # (n_chains,)
+
+            mask = accept[:, np.newaxis]
+            x_unit = np.where(mask, x_unit_proposed, x_unit)
+            x_raw = np.where(mask, x_raw_proposed, x_raw)
+            f_current = np.where(accept, f_proposed, f_current)
+
+            if step >= self.n_burnin:
+                collected.append(x_raw.copy())  # each entry: (n_chains, dim)
+
+        # Stack collected steps → (n_steps * n_chains, dim), then thin
+        pool = np.concatenate(collected, axis=0)
+        chosen = self._rng.choice(len(pool), size=n_candidates, replace=False)
+        return pool[chosen], None
 
 
 # ---------------------------------------------------------------------------
