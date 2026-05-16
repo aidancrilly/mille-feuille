@@ -691,9 +691,12 @@ class MetropolisHastingsGenerator(CandidateGenerator):
 
     .. math::
 
-        \\alpha = \\min\\!\\left(1,\\; f' / f \\right)
+        \\alpha = \\min\\!\\left(1,\\; \\exp(f' - f)\\right)
 
     so the chain drifts towards regions of higher predicted value.
+
+    N.B. Ys must represent log likelihoods or similar, i.e. higher is
+    better.
 
     After ``n_burnin`` warm-up steps, the chains collect samples.  The
     total pool across all chains is randomly thinned to return exactly
@@ -705,9 +708,9 @@ class MetropolisHastingsGenerator(CandidateGenerator):
         proposal_std:    Standard deviation of the Gaussian proposal in
                          unit-cube space (default ``0.05``).
         n_burnin:        Number of burn-in steps discarded per chain
-                         (default ``50``).
+                         (default ``0``).
         n_steps:         Number of post-burn-in steps collected per chain
-                         (default ``200``).  Total pool size is
+                         (default ``20``).  Total pool size is
                          ``n_chains * n_steps``; must be ``>= n_candidates``.
         n_chains:        Number of independent chains (default ``4``).
         refit_surrogate: Refit surrogate before running chains (default
@@ -800,6 +803,9 @@ class MetropolisHastingsGenerator(CandidateGenerator):
     # ------------------------------------------------------------------
 
     def generate(self, state: State, n_candidates: int) -> tuple[npt.NDArray, None]:
+        if state.l_MultiFidelity:
+            raise NotImplementedError("MetropolisHastingsGenerator does not currently support multi-fidelity problems.")
+
         pool_size = self.n_chains * self.n_steps
         if pool_size < n_candidates:
             raise ValueError(
@@ -837,8 +843,10 @@ class MetropolisHastingsGenerator(CandidateGenerator):
             f_proposed = np.where(out_of_bounds, -np.inf, self._score_batch(state, x_raw_proposed))  # (n_chains,)
 
             # Vectorised MH acceptance
-            alpha = f_proposed / f_current
-            accept = (alpha >= 1.0) | (self._rng.uniform(size=self.n_chains) < alpha)  # (n_chains,)
+            log_alpha = f_proposed - f_current
+            accept = (log_alpha >= 0.0) | (
+                self._rng.uniform(size=self.n_chains) < np.clip(np.exp(log_alpha), None, 1.0)
+            )  # (n_chains,)
 
             mask = accept[:, np.newaxis]
             x_unit = np.where(mask, x_unit_proposed, x_unit)

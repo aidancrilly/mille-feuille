@@ -6,6 +6,7 @@ from millefeuille.simulator import PythonSimulator
 from millefeuille.state import State
 from millefeuille.surrogate import SingleFidelityGPSurrogate
 from millefeuille.utils import run_generator_loop
+from scipy.stats import qmc
 
 
 @pytest.mark.unit
@@ -15,7 +16,7 @@ def test_MetropolisHastingsGenerator():
 
     class _TestSimulator(PythonSimulator):
         def __call__(self, indices, Xs, Ss=None):
-            Ys = np.exp(-0.5 * np.sum(Xs**2, axis=-1, keepdims=True))
+            Ys = -0.5 * np.sum(Xs**2, axis=-1, keepdims=True)
             return None, Ys
 
     # Create a surrogate with a known kernel and hyperparameters
@@ -34,7 +35,7 @@ def test_MetropolisHastingsGenerator():
 
     # Create a state with some random data
     Ninitial = 100
-    Xs = np.random.uniform(low=-2.0, high=2.0, size=(Ninitial, 2))
+    Xs = qmc.Sobol(domain.dim, scramble=True, seed=12).random(Ninitial) * (domain.b_up - domain.b_low) + domain.b_low
     Ys = simulator(None, Xs)[1]
     state = State(input_domain=domain, index=np.arange(Ninitial), Xs=Xs, Ys=Ys)
 

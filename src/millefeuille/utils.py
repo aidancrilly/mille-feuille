@@ -291,6 +291,7 @@ def run_generator_loop(
         index_next, X_next, S_next = generate_candidates(state, batch_size)
         if verbose:
             gen_time = time.time() - gen_start
+            sim_start = time.time()
             print(f"Generated candidates in {gen_time:.2f} seconds.")
 
         if isinstance(simulator, ExectuableSimulator):
@@ -301,7 +302,7 @@ def run_generator_loop(
             print("simulator class not recognised, inherit for mille-feuille Simulator classes...")
 
         if verbose:
-            sim_time = time.time() - gen_start - gen_time
+            sim_time = time.time() - sim_start
             total_time = time.time() - start
             print(f"Simulated candidates in {sim_time:.2f} seconds.")
             print(f"Total iteration time: {total_time:.2f} seconds.")
