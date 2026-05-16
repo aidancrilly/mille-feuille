@@ -691,7 +691,7 @@ class MetropolisHastingsGenerator(CandidateGenerator):
 
     .. math::
 
-        \\alpha = \\min\\!\\left(1,\\; \\exp(f' - f)\\right)
+        \\alpha = \\min\\!\\left(1,\\; f' / f \\right)
 
     so the chain drifts towards regions of higher predicted value.
 
