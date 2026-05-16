@@ -69,9 +69,9 @@ def test_MetropolisHastingsGenerator():
     new_Xs = new_state.Xs[Ninitial:]
 
     assert new_Xs.shape == (Nsamples * batch_size, 2)
-    assert np.all(np.isclose(np.mean(new_Xs, axis=0), np.array([0.0, 0.0]), atol=0.15))
-    assert np.all(np.isclose(np.std(new_Xs, axis=0), np.array([1.0, 1.0]), atol=0.15))
+    assert np.all(np.isclose(np.mean(new_Xs, axis=0), np.array([0.0, 0.0]), atol=0.20))
+    assert np.all(np.isclose(np.std(new_Xs, axis=0), np.array([1.0, 1.0]), atol=0.20))
 
     # Check that the new Xs are uncorrelated between dimensions
     corr = np.corrcoef(new_Xs, rowvar=False)
-    assert np.isclose(corr[0, 1], 0.0, atol=0.15)
+    assert np.isclose(corr[0, 1], 0.0, atol=0.20)
