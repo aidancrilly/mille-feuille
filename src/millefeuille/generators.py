@@ -820,6 +820,7 @@ class MetropolisHastingsGenerator(CandidateGenerator):
         # x_unit / x_raw carry the state of all chains simultaneously
         x_unit = self._seed_points_unit(state)  # (n_chains, dim)
         x_raw = self.domain.inverse_transform(x_unit)  # (n_chains, dim)
+        x_raw_init = x_raw.copy()  # for check of no movement
         f_current = self._score_batch(state, x_raw)  # (n_chains,)
 
         collected: list[npt.NDArray] = []
@@ -854,7 +855,8 @@ class MetropolisHastingsGenerator(CandidateGenerator):
             f_current = np.where(accept, f_proposed, f_current)
 
             if step >= self.n_burnin:
-                collected.append(x_raw.copy())  # each entry: (n_chains, dim)
+                if not np.isclose(x_raw, x_raw_init).all():  # Reject no-move steps in the collected pool
+                    collected.append(x_raw.copy())  # each entry: (n_chains, dim)
 
         # Stack collected steps → (n_steps * n_chains, dim), then thin
         pool = np.concatenate(collected, axis=0)

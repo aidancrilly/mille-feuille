@@ -34,7 +34,7 @@ def test_MetropolisHastingsGenerator():
     simulator = _TestSimulator()
 
     # Create a state with some random data
-    Ninitial = 100
+    Ninitial = 128
     Xs = qmc.Sobol(domain.dim, scramble=True, seed=12).random(Ninitial) * (domain.b_up - domain.b_low) + domain.b_low
     Ys = simulator(None, Xs)[1]
     state = State(input_domain=domain, index=np.arange(Ninitial), Xs=Xs, Ys=Ys)
@@ -43,6 +43,7 @@ def test_MetropolisHastingsGenerator():
     surrogate.fit(state)
 
     # Create the generator
+    # N.B. refit_surrogate=False for test robustness
     generator = MetropolisHastingsGenerator(
         domain=domain,
         surrogate=surrogate,
@@ -50,10 +51,11 @@ def test_MetropolisHastingsGenerator():
         n_burnin=10,
         n_steps=10,
         n_chains=100,
+        refit_surrogate=False,
     )
 
     # Generate new candidates
-    Nsamples = 20
+    Nsamples = 50
     batch_size = 10
     new_state = run_generator_loop(
         Nsamples=Nsamples,
