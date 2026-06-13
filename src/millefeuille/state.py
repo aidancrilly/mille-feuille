@@ -2,6 +2,7 @@ import csv
 import json
 import os
 import sqlite3
+import warnings
 from dataclasses import dataclass
 
 import numpy as np
@@ -204,6 +205,85 @@ class State:
             self.best_value = Ys_target.max(axis=0)
             self.best_value_transformed = self.Y_scaler.transform(self.best_value, return_torch=False)
             self.nsamples = self.Ys.shape[0]
+
+    def filter(self, mask: npt.NDArray) -> "State":
+        """Return a new State containing only rows where *mask* is True.
+
+        Parameters
+        ----------
+        mask : np.ndarray
+            Boolean array of length ``nsamples``.
+
+        Returns
+        -------
+        State
+            Filtered copy preserving all columns including ``Ss``.
+        """
+        if not mask.any():
+            return State(
+                input_domain=self.input_domain,
+                index=None,
+                Xs=None,
+                Ys=None,
+                Ps=None,
+                Ss=None,
+                index_names=self.index_names,
+                X_names=self.X_names,
+                Y_names=self.Y_names,
+                P_names=self.P_names,
+                S_names=self.S_names,
+                Y_scaler=None,
+                fidelity_domain=self.fidelity_domain,
+            )
+
+        return State(
+            input_domain=self.input_domain,
+            index=self.index[mask] if self.index is not None else None,
+            Xs=self.Xs[mask] if self.Xs is not None else None,
+            Ys=self.Ys[mask] if self.Ys is not None else None,
+            Ps=self.Ps[mask] if self.Ps is not None else None,
+            Ss=self.Ss[mask] if self.Ss is not None else None,
+            index_names=self.index_names,
+            X_names=self.X_names,
+            Y_names=self.Y_names,
+            P_names=self.P_names,
+            S_names=self.S_names,
+            Y_scaler=None,
+            fidelity_domain=self.fidelity_domain,
+        )
+
+    def filter_by_fidelity(self, fidelity_value: int) -> "State":
+        """Return a new single-fidelity State for the given fidelity level.
+
+        Parameters
+        ----------
+        fidelity_value : int
+            The fidelity level to select (compared against ``Ss[:, 0]``).
+
+        Returns
+        -------
+        State
+            Filtered State **without** ``Ss``, ``S_names``, or
+            ``fidelity_domain`` (it represents a single-fidelity slice).
+
+        Raises
+        ------
+        ValueError
+            If ``self.Ss`` is ``None``.
+        """
+        if self.Ss is None:
+            raise ValueError("State has no fidelity column (Ss)")
+
+        mask = self.Ss[:, 0] == fidelity_value
+        filtered = self.filter(mask)
+
+        # Strip fidelity information from the single-fidelity slice
+        filtered.Ss = None
+        filtered.S_names = None
+        filtered.fidelity_domain = None
+        filtered.l_MultiFidelity = False
+
+        return filtered
 
     def update(self, index_next, X_next, Y_next, S_next=None, P_next=None, refit_scaler=True):
         # Check for 1D arrays
@@ -467,7 +547,7 @@ class State:
             conn.close()
 
     @staticmethod
-    def load(filename: str, Y_scaler: None | object = None):
+    def load(filename: str, Y_scaler: None | object = None, default_Ss: int | None = None):
         """
         Load state from a SQLite database file.
 
@@ -477,6 +557,10 @@ class State:
             Path to the SQLite database.
         Y_scaler : object, optional
             Output scaler. A fresh StandardScaler is created when *None*.
+        default_Ss : int, optional
+            When not *None* and the loaded State has no ``Ss`` column,
+            automatically set ``Ss`` to a constant array of this value
+            and ``S_names`` to ``["fidelity"]``.
 
         Returns
         -------
@@ -552,7 +636,7 @@ class State:
                 col_indices = [db_col_names.index(n) for n in names]
                 return data[:, col_indices]
 
-            return State(
+            state = State(
                 input_domain=input_domain,
                 index=_extract(index_names),
                 Xs=_extract(X_names),
@@ -567,5 +651,14 @@ class State:
                 Y_scaler=Y_scaler,
                 fidelity_domain=fidelity_domain,
             )
+
+            if default_Ss is not None:
+                if state.Ss is None and state.index is not None:
+                    state.Ss = np.full((len(state.index), 1), default_Ss, dtype=float)
+                    state.S_names = ["fidelity"]
+                elif state.Ss is not None:
+                    warnings.warn("default_Ss ignored: loaded State already has Ss", UserWarning, stacklevel=2)
+
+            return state
         finally:
             conn.close()

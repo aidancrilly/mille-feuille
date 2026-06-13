@@ -178,10 +178,13 @@ def test_optimise_fixed_features_raises_for_multifidelity(multifidelitysample, g
 @pytest.mark.unit
 def test_optimise_singlefidelity_RF(singlefidelitysample, batch_size, generate_acq_function):
     Is, Xs, Ys, f = singlefidelitysample
+    rf_seed = 124
 
     state = State(ForresterDomain, Is, Xs, Ys)
 
-    surrogate = SingleFidelityRandomForestSurrogate(n_estimators=50)
+    torch.manual_seed(rf_seed)
+    np.random.seed(rf_seed)
+    surrogate = SingleFidelityRandomForestSurrogate(n_estimators=50, random_state=rf_seed)
     surrogate.fit(state)
 
     best_y = float(state.best_value.item())
@@ -204,7 +207,9 @@ def test_optimise_singlefidelity_RF(singlefidelitysample, batch_size, generate_a
 
     # Reset and use full wrapper
     initial_state = State(ForresterDomain, Is, Xs, Ys)
-    surrogate = SingleFidelityRandomForestSurrogate(n_estimators=50)
+    torch.manual_seed(rf_seed)
+    np.random.seed(rf_seed)
+    surrogate = SingleFidelityRandomForestSurrogate(n_estimators=50, random_state=rf_seed)
 
     new_state = run_Bayesian_optimiser(
         5,

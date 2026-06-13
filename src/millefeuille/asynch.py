@@ -13,6 +13,7 @@ Key components:
 
 import logging
 import os
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -73,10 +74,24 @@ class AsyncScheduler:
         self._scheduler = scheduler
         self._simulator = simulator
         self._resources = resource_manager
-        self._fidelity_configs = fidelity_configs or {}
+
+        if fidelity_configs is not None:
+            self._fidelity_configs = fidelity_configs
+        else:
+            # Try to infer from simulator.cores_required
+            try:
+                # Probe the simulator to see if cores_required is implemented
+                simulator.cores_required(0)
+                self._fidelity_configs = {}  # will use _get_fidelity_config fallback
+            except NotImplementedError:
+                self._fidelity_configs = {}
+            except Exception:
+                self._fidelity_configs = {}
         self._max_workers = max_workers
         self._poll_interval = poll_interval
         self._pending_tasks: list[Task] = []
+        self._in_flight: dict = {}  # future -> Task
+        self._in_flight_lock = threading.Lock()
 
     # -- helpers ------------------------------------------------------------
 
@@ -84,6 +99,13 @@ class AsyncScheduler:
         """Return the ``FidelityConfig`` for fidelity *s*."""
         if s is not None and s in self._fidelity_configs:
             return self._fidelity_configs[s]
+        # Try simulator.cores_required
+        if s is not None:
+            try:
+                cores = self._simulator.cores_required(s)
+                return FidelityConfig(cores_required=cores)
+            except (NotImplementedError, AttributeError):
+                pass
         # Fall back to simulator metadata
         if isinstance(self._simulator, ExectuableSimulator):
             s_idx = s if s is not None else 0
@@ -116,6 +138,38 @@ class AsyncScheduler:
     def add_tasks(self, tasks: list[Task]):
         """Append *tasks* to the pending queue."""
         self._pending_tasks.extend(tasks)
+
+    def tasks_in_flight(self, fidelity: int | None = None) -> list[Task]:
+        """Return currently running (submitted but not completed) tasks.
+
+        Parameters
+        ----------
+        fidelity : int, optional
+            If given, return only tasks with ``task.s == fidelity``.
+
+        Returns
+        -------
+        list[Task]
+        """
+        with self._in_flight_lock:
+            tasks = list(self._in_flight.values())
+        if fidelity is not None:
+            tasks = [t for t in tasks if t.s == fidelity]
+        return tasks
+
+    def n_tasks_in_flight(self, fidelity: int | None = None) -> int:
+        """Return the number of currently in-flight tasks.
+
+        Parameters
+        ----------
+        fidelity : int, optional
+            If given, count only tasks with ``task.s == fidelity``.
+
+        Returns
+        -------
+        int
+        """
+        return len(self.tasks_in_flight(fidelity))
 
     # -- scheduling strategy ------------------------------------------------
 
@@ -221,15 +275,18 @@ class AsyncScheduler:
         all_results: list[tuple] = []
 
         with ThreadPoolExecutor(max_workers=self._max_workers) as executor:
-            futures: dict = {}  # future -> Task
+            with self._in_flight_lock:
+                self._in_flight.clear()
 
-            while self._pending_tasks or futures:
+            while self._pending_tasks or self._in_flight:
                 # 1. Harvest completed futures
                 num_completed = 0
-                done = [f for f in futures if f.done()]
+                with self._in_flight_lock:
+                    done = [f for f in self._in_flight if f.done()]
 
                 for future in done:
-                    task = futures.pop(future)
+                    with self._in_flight_lock:
+                        task = self._in_flight.pop(future)
                     num_completed += 1
                     try:
                         _, P, Y = future.result()
@@ -282,10 +339,11 @@ class AsyncScheduler:
                         self._resources.utilisation() * 100,
                     )
                     future = executor.submit(self._run_single_task, task)
-                    futures[future] = task
+                    with self._in_flight_lock:
+                        self._in_flight[future] = task
 
                 # 4. Avoid busy-waiting
-                if self._pending_tasks or futures:
+                if self._pending_tasks or self._in_flight:
                     time.sleep(self._poll_interval)
 
         logger.info("All tasks complete. Total: %d", len(all_results))

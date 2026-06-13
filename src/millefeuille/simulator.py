@@ -18,20 +18,63 @@ class PythonSimulator(ABC):
     ) -> tuple[npt.NDArray | None, npt.NDArray]:
         pass
 
+    def cores_required(self, s: int) -> int:
+        """Return the number of cores needed for fidelity level *s*.
+
+        Override this in subclasses to enable automatic
+        ``FidelityConfig`` construction via
+        ``FidelityConfig.from_simulator``.
+
+        Raises
+        ------
+        NotImplementedError
+            By default — subclasses should override.
+        """
+        raise NotImplementedError
+
 
 class Scheduler(ABC):
     """
     Abstract base class for scheduling and launching parallel simulations on HPC systems.
     """
 
+    @staticmethod
+    def _normalise_nprocs(nprocs: int | list[int], n_jobs: int) -> list[int]:
+        """Broadcast or validate *nprocs* to a per-job list.
+
+        Parameters
+        ----------
+        nprocs : int or list[int]
+            A single core count (broadcast to all jobs) or a per-job list.
+        n_jobs : int
+            Number of jobs being launched.
+
+        Returns
+        -------
+        list[int]
+
+        Raises
+        ------
+        ValueError
+            If *nprocs* is a list whose length differs from *n_jobs*.
+        """
+        if isinstance(nprocs, (int, np.integer)):
+            return [int(nprocs)] * n_jobs
+        nprocs_list = list(nprocs)
+        if len(nprocs_list) != n_jobs:
+            raise ValueError(f"len(nprocs) = {len(nprocs_list)} but {n_jobs} jobs were provided")
+        return nprocs_list
+
     @abstractmethod
-    def launch_jobs(self, exe: str, nprocs: Sequence[int], inputs: Sequence, indices: Sequence[str]):
+    def launch_jobs(self, exe: str, nprocs: int | list[int], inputs: Sequence, indices: Sequence[str]):
         """
         Launches simulation jobs in parallel.
 
         Parameters:
             exe: Path to the MPI-enabled executable
-            nproc: Number of processes per job
+            nprocs: Number of processes per job. A single ``int`` is
+                broadcast to every job; a ``list[int]`` must have the
+                same length as *inputs*.
             inputs: List of input file paths
             indices: List of run indices (for logging/output naming)
         """
@@ -60,6 +103,13 @@ class ExectuableSimulator(ABC):
     @abstractmethod
     def nproc_per_fidelity(self) -> list[int]:
         pass
+
+    def cores_required(self, s: int) -> int:
+        """Return the number of cores needed for fidelity level *s*.
+
+        Default implementation indexes into ``nproc_per_fidelity``.
+        """
+        return self.nproc_per_fidelity[s]
 
     def prepare_inputs(self, indices: npt.NDArray, Xs: npt.NDArray, Ss: None | npt.NDArray = None):
         if Ss is None:
@@ -130,6 +180,39 @@ class FidelityConfig:
     cores_required: int
     reserve: bool = False
     estimated_runtime: float | None = None
+
+    @classmethod
+    def from_simulator(
+        cls,
+        simulator,
+        fidelity_levels: list[int],
+        reserve: dict[int, bool] | None = None,
+    ) -> dict[int, "FidelityConfig"]:
+        """Build a fidelity config dict from a simulator.
+
+        Calls ``simulator.cores_required(s)`` for each fidelity level.
+
+        Parameters
+        ----------
+        simulator : PythonSimulator or ExectuableSimulator
+            Must implement ``cores_required(s)``.
+        fidelity_levels : list[int]
+            Fidelity levels to include.
+        reserve : dict[int, bool], optional
+            Per-fidelity reservation flag.  Defaults to ``False`` for all.
+
+        Returns
+        -------
+        dict[int, FidelityConfig]
+        """
+        reserve = reserve or {}
+        configs: dict[int, FidelityConfig] = {}
+        for s in fidelity_levels:
+            configs[s] = cls(
+                cores_required=simulator.cores_required(s),
+                reserve=reserve.get(s, False),
+            )
+        return configs
 
 
 @dataclass
