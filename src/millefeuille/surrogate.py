@@ -8,13 +8,13 @@ import numpy.typing as npt
 import torch
 import torch.nn as nn
 from botorch.fit import fit_gpytorch_mll
-from botorch.models import SingleTaskGP
+from botorch.models import ModelListGP, SingleTaskGP
 from botorch.models.ensemble import EnsembleModel
 from botorch.models.multitask import MultiTaskGP
 from gpytorch.constraints import Interval
 from gpytorch.kernels import Kernel, RBFKernel, ScaleKernel
 from gpytorch.likelihoods import GaussianLikelihood
-from gpytorch.mlls import ExactMarginalLogLikelihood
+from gpytorch.mlls import ExactMarginalLogLikelihood, SumMarginalLogLikelihood
 from gpytorch.module import Module
 from sklearn.ensemble import RandomForestRegressor
 from torch import Tensor
@@ -349,6 +349,92 @@ class MultiFidelityGPSurrogate(BaseGPSurrogate):
 
         # Return in same dict format as before
         return {fid: {"mean": mean[:, fid], "std": std[:, fid]} for fid in range(F)}
+
+
+##################################################
+########### Multi-Objective GP Model #############
+##################################################
+
+
+class MultiObjectiveGPSurrogate(BaseGPSurrogate):
+    """
+    Multi-objective GP surrogate built as a list of independent
+    SingleTaskGPs, one per objective (BOtorch ``ModelListGP``).
+
+    This model is compatible with BOtorch multi-objective acquisition
+    functions such as ``qLogExpectedHypervolumeImprovement``.
+    The ``model`` attribute is a ``ModelListGP`` and can be passed
+    directly to ``get_qLogEHVI_acq``.
+    """
+
+    def init_GP_model(self, state: State, **kwargs):
+        X_torch, Y_torch = self.get_XY(state)
+        n_objectives = Y_torch.shape[-1]
+
+        models = []
+        for i in range(n_objectives):
+            covar_module = self._get_covar_module(state.dim)
+            likelihood_i = GaussianLikelihood(noise_constraint=Interval(*self.noise_interval))
+            gp = SingleTaskGP(
+                X_torch,
+                Y_torch[:, i : i + 1],
+                mean_module=copy.deepcopy(self.mean_module) if self.mean_module is not None else None,
+                covar_module=covar_module,
+                likelihood=likelihood_i,
+                **kwargs,
+            )
+            models.append(gp)
+
+        self.model = ModelListGP(*models)
+        self.n_objectives = n_objectives
+
+    def fit(self, state: State, max_retries: int = 1, approx_mll: bool = False, **kwargs):
+        self.init_GP_model(state, **kwargs)
+
+        mll = SumMarginalLogLikelihood(self.model.likelihood, self.model)
+
+        for attempt in range(max_retries):
+            try:
+                fit_gpytorch_mll(mll, approx_mll=approx_mll)
+                break
+            except RuntimeError as e:
+                print(f"Fitting failed (attempt {attempt + 1}), retrying... {e}")
+
+        if self.verbose:
+            self.print_fit_summary()
+
+    def print_fit_summary(self):
+        print("MultiObjectiveGPSurrogate fit summary:")
+        for i, m in enumerate(self.model.models):
+            noise = m.likelihood.noise.item()
+            ls = m.covar_module.base_kernel.lengthscale.detach().cpu().numpy().flatten()
+            print(f"  Objective {i}: noise={noise:.6e}, lengthscales={ls}")
+
+    def eval(self):
+        self.model.eval()
+
+    def save(self, filepath: str):
+        torch.save({"model_state_dict": self.model.state_dict()}, filepath)
+
+    def load(self, filepath: str, eval=True):
+        checkpoint = torch.load(filepath, weights_only=False, map_location=device)
+        self.model.load_state_dict(checkpoint["model_state_dict"])
+        if eval:
+            self.eval()
+
+    def predict(self, state: State, Xs):
+        Xs_unit = state.transform_X(Xs)
+        test_X = torch.tensor(Xs_unit, dtype=dtype, device=device)
+
+        self.eval()
+
+        with torch.no_grad():
+            post = self.model.posterior(test_X)
+            mean = post.mean.cpu().numpy()  # (N, n_objectives)
+            std = np.sqrt(post.variance.cpu().numpy())  # (N, n_objectives)
+
+        mean, std = state.inverse_transform_Y(mean, std)
+        return {"mean": mean, "std": std}
 
 
 ##################################################

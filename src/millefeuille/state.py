@@ -158,12 +158,11 @@ class State:
     nsamples: int = 0
     best_value: float = -float("inf")
     best_value_transformed: float = -float("inf")
+    worst_value: float = float("inf")
+    worst_value_transformed: float = float("inf")
 
     def __post_init__(self):
         self.dim = self.input_domain.dim
-
-        if self.Y_scaler is None:
-            self.Y_scaler = StandardScaler()
 
         if self.fidelity_domain is not None:
             self.fidelity_domain.combine_with_input_domain(self.dim)
@@ -196,6 +195,8 @@ class State:
             self.S_names = self.auto_naming_and_check(self.S_names, self.Ss.shape, default_prefix="s_")
 
         if self.Ys is not None:
+            if self.Y_scaler is None:
+                self.Y_scaler = StandardScaler(m=self.Ys.shape[1])
             self.Y_scaler.fit(self.Ys)
             if self.l_MultiFidelity:
                 Ys_target = self.Ys[self.Ss[:, 0] == self.target_fidelity, :]
@@ -203,6 +204,8 @@ class State:
                 Ys_target = self.Ys.copy()
             self.best_value = Ys_target.max(axis=0)
             self.best_value_transformed = self.Y_scaler.transform(self.best_value, return_torch=False)
+            self.worst_value = Ys_target.min(axis=0)
+            self.worst_value_transformed = self.Y_scaler.transform(self.worst_value, return_torch=False)
             self.nsamples = self.Ys.shape[0]
 
     def update(self, index_next, X_next, Y_next, S_next=None, P_next=None, refit_scaler=True):
@@ -234,6 +237,8 @@ class State:
             self.S_names = self.auto_naming_and_check(None, self.Ss.shape, default_prefix="s_")
 
         if refit_scaler and self.Ys.shape[0] > 1:
+            if self.Y_scaler is None:
+                self.Y_scaler = StandardScaler(m=self.Ys.shape[1])
             self.Y_scaler.fit(self.Ys)
 
         if self.l_MultiFidelity:
@@ -242,10 +247,13 @@ class State:
             Ys_target = self.Ys.copy()
 
         self.best_value = Ys_target.max(axis=0)
+        self.worst_value = Ys_target.min(axis=0)
         if self.Ys.shape[0] > 1:
             self.best_value_transformed = self.Y_scaler.transform(self.best_value, return_torch=False)
+            self.worst_value_transformed = self.Y_scaler.transform(self.worst_value, return_torch=False)
         else:
             self.best_value_transformed = self.best_value.copy()
+            self.worst_value_transformed = self.worst_value.copy()
 
         self.nsamples = self.Ys.shape[0]
 
