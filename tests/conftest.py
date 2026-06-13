@@ -109,6 +109,6 @@ class PythonBiObjectiveFunction(PythonSimulator):
     """
 
     def __call__(self, indices, Xs, Ss=None):
-        f1 = -(Xs - 0.2) ** 2  # shape (N, 1)
-        f2 = -(Xs - 0.8) ** 2  # shape (N, 1)
+        f1 = -((Xs - 0.2) ** 2)  # shape (N, 1)
+        f2 = -((Xs - 0.8) ** 2)  # shape (N, 1)
         return None, np.hstack([f1, f2])  # shape (N, 2)

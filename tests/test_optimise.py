@@ -5,7 +5,7 @@ import torch
 from botorch.acquisition.multi_objective.logei import qLogExpectedHypervolumeImprovement
 from botorch.utils.multi_objective.hypervolume import Hypervolume
 from botorch.utils.multi_objective.pareto import is_non_dominated
-from millefeuille.acquisition import get_qLogEHVI_acq, get_qLogEI_MF_acq, get_qLogEI_acq, get_qUCB_MF_acq, get_qUCB_acq
+from millefeuille.acquisition import get_qLogEHVI_acq, get_qLogEI_acq, get_qLogEI_MF_acq, get_qUCB_acq, get_qUCB_MF_acq
 from millefeuille.domain import FidelityDomain, InputDomain
 from millefeuille.initialise import generate_initial_sample
 from millefeuille.optimise import suggest_next_locations
@@ -323,6 +323,4 @@ def test_optimise_multiobjective_GP(multiobjective_sample, batch_size):
     Y_after = torch.tensor(state.Ys, dtype=torch.double)
     hv_after = Hypervolume(ref_point=hv_ref).compute(Y_after[is_non_dominated(Y_after)])
 
-    assert hv_after >= hv_before, (
-        f"Hypervolume decreased after BO step: {hv_before:.6f} -> {hv_after:.6f}"
-    )
+    assert hv_after >= hv_before, f"Hypervolume decreased after BO step: {hv_before:.6f} -> {hv_after:.6f}"
