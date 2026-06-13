@@ -162,9 +162,6 @@ class State:
     def __post_init__(self):
         self.dim = self.input_domain.dim
 
-        if self.Y_scaler is None:
-            self.Y_scaler = StandardScaler()
-
         if self.fidelity_domain is not None:
             self.fidelity_domain.combine_with_input_domain(self.dim)
             self.target_fidelity = self.fidelity_domain.target_fidelity
@@ -196,6 +193,8 @@ class State:
             self.S_names = self.auto_naming_and_check(self.S_names, self.Ss.shape, default_prefix="s_")
 
         if self.Ys is not None:
+            if self.Y_scaler is None:
+                self.Y_scaler = StandardScaler(m=self.Ys.shape[1])
             self.Y_scaler.fit(self.Ys)
             if self.l_MultiFidelity:
                 Ys_target = self.Ys[self.Ss[:, 0] == self.target_fidelity, :]
@@ -234,6 +233,8 @@ class State:
             self.S_names = self.auto_naming_and_check(None, self.Ss.shape, default_prefix="s_")
 
         if refit_scaler and self.Ys.shape[0] > 1:
+            if self.Y_scaler is None:
+                self.Y_scaler = StandardScaler(m=self.Ys.shape[1])
             self.Y_scaler.fit(self.Ys)
 
         if self.l_MultiFidelity:
