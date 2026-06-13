@@ -47,7 +47,7 @@ def get_qUCB_acq(surrogate, state, beta: float = 1.0):
     state : State
         Current optimisation state.
     beta : float, optional
-        Exploration–exploitation trade-off parameter (default 1.0).
+        Exploration-exploitation trade-off parameter (default 1.0).
 
     Returns
     -------
@@ -99,7 +99,7 @@ def get_qUCB_MF_acq(surrogate, state, beta: float = 1.0, weights=None):
     state : State
         Current optimisation state.
     beta : float, optional
-        Exploration–exploitation trade-off parameter (default 1.0).
+        Exploration-exploitation trade-off parameter (default 1.0).
     weights : torch.Tensor or None, optional
         1-D weight tensor for the scalarization. Defaults to ``[1.0]``.
 
@@ -119,7 +119,7 @@ def get_qLogEHVI_acq(surrogate, state, ref_point=None):
     multi-objective BO.
 
     The reference point and ``NondominatedPartitioning`` are both computed in
-    the *normalised* (model) output space – i.e. the space of the Y values
+    the *normalised* (model) output space - i.e. the space of the Y values
     returned by ``state.transform_XY()``.
 
     Parameters
@@ -131,18 +131,19 @@ def get_qLogEHVI_acq(surrogate, state, ref_point=None):
         ``(N, n_objectives)``.
     ref_point : array-like or None, optional
         Reference point in *normalised* output space, length ``n_objectives``.
-        Defaults to ``torch.zeros(n_objectives)``.  The reference point must
-        be dominated by all Pareto-optimal solutions.
+        Defaults to ``state.worst_value_transformed`` (the per-objective minimum
+        of observed data in normalised space), which is always dominated by all
+        Pareto-optimal solutions seen so far.  The reference point must be
+        dominated by all Pareto-optimal solutions.
 
     Returns
     -------
     qLogExpectedHypervolumeImprovement
     """
     _, Y_transformed = state.transform_XY()
-    n_objectives = Y_transformed.shape[-1]
 
     if ref_point is None:
-        ref_point_t = torch.zeros(n_objectives, dtype=dtype, device=device)
+        ref_point_t = torch.tensor(state.worst_value_transformed, dtype=dtype, device=device).flatten()
     else:
         ref_point_t = torch.tensor(ref_point, dtype=dtype, device=device)
 

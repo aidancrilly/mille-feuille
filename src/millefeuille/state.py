@@ -158,6 +158,8 @@ class State:
     nsamples: int = 0
     best_value: float = -float("inf")
     best_value_transformed: float = -float("inf")
+    worst_value: float = float("inf")
+    worst_value_transformed: float = float("inf")
 
     def __post_init__(self):
         self.dim = self.input_domain.dim
@@ -202,6 +204,8 @@ class State:
                 Ys_target = self.Ys.copy()
             self.best_value = Ys_target.max(axis=0)
             self.best_value_transformed = self.Y_scaler.transform(self.best_value, return_torch=False)
+            self.worst_value = Ys_target.min(axis=0)
+            self.worst_value_transformed = self.Y_scaler.transform(self.worst_value, return_torch=False)
             self.nsamples = self.Ys.shape[0]
 
     def update(self, index_next, X_next, Y_next, S_next=None, P_next=None, refit_scaler=True):
@@ -243,10 +247,13 @@ class State:
             Ys_target = self.Ys.copy()
 
         self.best_value = Ys_target.max(axis=0)
+        self.worst_value = Ys_target.min(axis=0)
         if self.Ys.shape[0] > 1:
             self.best_value_transformed = self.Y_scaler.transform(self.best_value, return_torch=False)
+            self.worst_value_transformed = self.Y_scaler.transform(self.worst_value, return_torch=False)
         else:
             self.best_value_transformed = self.best_value.copy()
+            self.worst_value_transformed = self.worst_value.copy()
 
         self.nsamples = self.Ys.shape[0]
 

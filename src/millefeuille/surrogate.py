@@ -430,7 +430,7 @@ class MultiObjectiveGPSurrogate(BaseGPSurrogate):
 
         with torch.no_grad():
             post = self.model.posterior(test_X)
-            mean = post.mean.cpu().numpy()              # (N, n_objectives)
+            mean = post.mean.cpu().numpy()  # (N, n_objectives)
             std = np.sqrt(post.variance.cpu().numpy())  # (N, n_objectives)
 
         mean, std = state.inverse_transform_Y(mean, std)
