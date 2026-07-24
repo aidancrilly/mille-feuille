@@ -711,43 +711,161 @@ class SingleFidelityEnsembleSurrogate(BaseEnsemblePyTorchSurrogate):
 class RandomForestEnsembleModel(EnsembleModel):
     """
     BoTorch EnsembleModel wrapping a scikit-learn RandomForestRegressor.
-    Each decision tree in the forest acts as one ensemble member.
+
+    Each decision tree is treated as one ensemble member.
+
+    Expected shapes
+    ---------------
+    Training X:
+        n_train x d
+
+    Training Y:
+        n_train x m
+
+    forward input X:
+        *batch_shape x q x d
+
+    forward output:
+        *batch_shape x n_estimators x q x m
     """
 
-    def __init__(self, n_estimators: int = 100, max_depth: int | None = None, **rf_kwargs):
+    def __init__(
+        self,
+        n_estimators: int = 100,
+        max_depth: int | None = None,
+        n_outputs: int = 1,
+        **rf_kwargs,
+    ):
         super().__init__()
-        self._num_outputs = 1
-        self.rf = RandomForestRegressor(n_estimators=n_estimators, max_depth=max_depth, **rf_kwargs)
+
+        if n_outputs < 1:
+            raise ValueError("n_outputs must be at least 1.")
+
+        self._num_outputs = n_outputs
+
+        self.rf = RandomForestRegressor(
+            n_estimators=n_estimators,
+            max_depth=max_depth,
+            **rf_kwargs,
+        )
 
     @property
     def no_grad(self) -> bool:
         return True
 
-    def fit(self, X: Tensor, y: Tensor) -> None:
-        X_np = X.cpu().double().numpy()
-        y_np = y.cpu().double().numpy().reshape(-1)
-        self.rf.fit(X_np, y_np)
+    def fit(self, X: Tensor, Y: Tensor) -> None:
+        """
+        Fit the random forest.
+
+        X shape:
+            n_train x d
+
+        Y shape:
+            n_train x n_outputs
+        """
+        if X.ndim != 2:
+            raise ValueError(
+                f"Training X must have shape (n_train, d), "
+                f"but received {tuple(X.shape)}."
+            )
+
+        if Y.ndim == 1:
+            Y = Y.unsqueeze(-1)
+
+        if Y.ndim != 2:
+            raise ValueError(
+                f"Training Y must have shape (n_train, n_outputs), "
+                f"but received {tuple(Y.shape)}."
+            )
+
+        if X.shape[0] != Y.shape[0]:
+            raise ValueError(
+                "X and Y must contain the same number of training points."
+            )
+
+        if Y.shape[-1] != self._num_outputs:
+            raise ValueError(
+                f"Expected {self._num_outputs} outputs, "
+                f"but Y has {Y.shape[-1]} outputs."
+            )
+
+        X_np = X.detach().cpu().double().numpy()
+        Y_np = Y.detach().cpu().double().numpy()
+
+        self.rf.fit(X_np, Y_np)
 
     def forward(self, X: Tensor) -> Tensor:
-        # X shape: (*batch_shape, q, D)
-        X_np = X.cpu().double().numpy()
+        """
+        Evaluate every tree in the random forest.
+
+        Input shape:
+            *batch_shape x q x d
+
+        Output shape:
+            *batch_shape x n_estimators x q x n_outputs
+        """
+        if X.ndim < 2:
+            raise ValueError(
+                "X must have shape (*batch_shape, q, d)."
+            )
+
         batch_shape = X.shape[:-2]
-        q, D = X.shape[-2:]
+        q = X.shape[-2]
+        d = X.shape[-1]
 
-        X_flat = X_np.reshape(-1, D)
+        # (*batch_shape, q, d)
+        # -> (prod(batch_shape) * q, d)
+        X_flat = (
+            X.detach()
+            .cpu()
+            .double()
+            .numpy()
+            .reshape(-1, d)
+        )
 
-        # Collect predictions from each tree: (n_estimators, prod(batch_shape)*q)
-        tree_preds = np.array([est.predict(X_flat) for est in self.rf.estimators_])
+        predictions = []
 
-        # Reshape to (n_estimators, *batch_shape, q)
-        tree_preds = tree_preds.reshape(len(self.rf.estimators_), *batch_shape, q)
+        for tree in self.rf.estimators_:
+            tree_prediction = tree.predict(X_flat)
 
-        # Move estimator axis behind batch dims: (*batch_shape, n_estimators, q)
-        tree_preds = np.moveaxis(tree_preds, 0, len(batch_shape))
-        # Add output dimension: (*batch_shape, n_estimators, q, m=1)
-        tree_preds = tree_preds[..., np.newaxis]
+            # Robust handling when n_outputs == 1.
+            # Convert (n_points,) into (n_points, 1).
+            if tree_prediction.ndim == 1:
+                tree_prediction = tree_prediction[:, None]
 
-        return torch.tensor(tree_preds, dtype=X.dtype, device=X.device)
+            predictions.append(tree_prediction)
+
+        # Shape:
+        # n_estimators x flattened_points x n_outputs
+        tree_preds = np.stack(predictions, axis=0)
+
+        # Shape:
+        # n_estimators x *batch_shape x q x n_outputs
+        tree_preds = tree_preds.reshape(
+            len(self.rf.estimators_),
+            *batch_shape,
+            q,
+            self._num_outputs,
+        )
+
+        # Move n_estimators behind the model batch dimensions.
+        #
+        # Before:
+        # n_estimators x *batch_shape x q x n_outputs
+        #
+        # After:
+        # *batch_shape x n_estimators x q x n_outputs
+        tree_preds = np.moveaxis(
+            tree_preds,
+            0,
+            len(batch_shape),
+        )
+
+        return torch.as_tensor(
+            tree_preds,
+            dtype=X.dtype,
+            device=X.device,
+        )
 
 
 class SingleFidelityRandomForestSurrogate(BaseSurrogate):
@@ -799,6 +917,61 @@ class SingleFidelityRandomForestSurrogate(BaseSurrogate):
             post = self.model.posterior(test_X.unsqueeze(1))
             mean = post.mean.cpu().numpy().reshape(-1, 1)
             var = post.variance.cpu().numpy().reshape(-1, 1)
+            std = np.sqrt(var)
+        mean, std = state.inverse_transform_Y(mean, std)
+        return {"mean": mean, "std": std}
+
+    def eval(self):
+        pass
+
+    def save(self, filepath: str):
+        torch.save({"rf": self.model.rf}, filepath)
+
+    def load(self, filepath: str, eval=True):
+        checkpoint = torch.load(filepath, weights_only=False, map_location=device)
+        self.model.rf = checkpoint["rf"]
+
+
+class MultiOutputRandomForestSurrogate(BaseSurrogate):
+    """
+    Multi-output surrogate using a Random Forest ensemble via BoTorch's EnsembleModel.
+
+    Hyperparameters
+    ---------------
+    n_estimators : int
+        Number of trees in the forest (default: 100).
+    max_depth : int or None
+        Maximum depth of each tree. None means nodes are expanded until all
+        leaves are pure or contain fewer than min_samples_split samples.
+    rf_kwargs : dict
+        Additional keyword arguments forwarded to
+        ``sklearn.ensemble.RandomForestRegressor``.
+    """
+
+    def __init__(self, n_outputs: int, n_estimators: int = 100, max_depth: int | None = None, verbose: bool = False, **rf_kwargs):
+        self.model = RandomForestEnsembleModel(n_estimators=n_estimators, max_depth=max_depth, n_outputs=n_outputs, **rf_kwargs)
+        self.verbose = verbose
+        self.n_outputs = n_outputs
+
+    def fit(self, state: State):
+        X_torch, Y_torch = self.get_XY(state)
+        self.model.fit(X_torch, Y_torch)
+
+    def print_fit_summary(self):
+        """
+        Print MSE and R2 of the random forest on the training data.
+        """
+        print("SingleFidelityRandomForestSurrogate fit summary:")
+        print(f"  MSE: {self._fit_mse:.6e}")
+        print(f"  R2:  {self._fit_r2:.6f}")
+
+    def predict(self, state: State, Xs):
+        Xs_unit = state.transform_X(Xs)
+        test_X = torch.tensor(Xs_unit, dtype=dtype, device=device)
+        with torch.no_grad():
+            post = self.model.posterior(test_X.unsqueeze(1))
+            mean = post.mean.cpu().numpy().reshape(-1, self.n_outputs)
+            var = post.variance.cpu().numpy().reshape(-1, self.n_outputs)
             std = np.sqrt(var)
         mean, std = state.inverse_transform_Y(mean, std)
         return {"mean": mean, "std": std}
