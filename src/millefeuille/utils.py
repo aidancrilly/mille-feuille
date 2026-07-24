@@ -2,6 +2,8 @@ import os
 import time
 import warnings
 
+import numpy as np
+
 from .generators import BayesianOptimisationGenerator, greedy_exclusion, probabilistic_threshold_filter
 from .optimise import *
 from .simulator import *
@@ -288,11 +290,42 @@ def run_generator_loop(
             start = time.time()
             gen_start = time.time()
 
-        index_next, X_next, S_next = generate_candidates(state, batch_size)
+        # Generate a complete physically valid batch.
+        # Invalid candidates are discarded before input files are prepared
+        # or GORGON jobs are launched.
+        max_generation_attempts = 1000
+
+        for generation_attempt in range(1, max_generation_attempts + 1):
+            index_next, X_next, S_next = generate_candidates(state, batch_size)
+
+            if not hasattr(simulator, "candidate_is_valid"):
+                break
+
+            valid_mask = np.asarray(
+                [simulator.candidate_is_valid(x) for x in X_next],
+                dtype=bool,
+            )
+
+            if np.all(valid_mask):
+                break
+
+            n_invalid = int((~valid_mask).sum())
+            print(
+                f"Rejected {n_invalid}/{batch_size} invalid candidates "
+                f"on generation attempt {generation_attempt}; "
+                f"generating a new batch."
+            )
+        else:
+            raise RuntimeError(
+                "Could not generate a fully valid candidate batch after "
+                f"{max_generation_attempts} attempts. Check the domain or "
+                "candidate validity conditions."
+            )
+
         if verbose:
             gen_time = time.time() - gen_start
             sim_start = time.time()
-            print(f"Generated candidates in {gen_time:.2f} seconds.")
+            print(f"Generated valid candidates in {gen_time:.2f} seconds.")
 
         if isinstance(simulator, ExectuableSimulator):
             P_next, Y_next = simulator(index_next, X_next, scheduler, Ss=S_next)
