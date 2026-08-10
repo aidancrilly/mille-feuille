@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 from millefeuille.domain import InputDomain
-from millefeuille.generators import MetropolisHastingsGenerator
+from millefeuille.generators import MetropolisHastingsGenerator, RandomCandidateGenerator
 from millefeuille.simulator import PythonSimulator
 from millefeuille.state import State
 from millefeuille.surrogate import SingleFidelityGPSurrogate
@@ -77,3 +77,52 @@ def test_MetropolisHastingsGenerator():
     # Check that the new Xs are uncorrelated between dimensions
     corr = np.corrcoef(new_Xs, rowvar=False)
     assert np.isclose(corr[0, 1], 0.0, atol=0.20)
+
+
+@pytest.mark.unit
+def test_domain_validity_filtering():
+    """Candidates rejected by ``domain.is_valid`` are discarded and the
+    generator regenerates until a full valid batch is returned."""
+
+    class HalfPlaneDomain(InputDomain):
+        """Only accept points whose first coordinate is positive."""
+
+        def is_valid(self, X):
+            return X[:, 0] > 0.0
+
+    domain = HalfPlaneDomain(
+        dim=2,
+        b_low=np.array([-2.0, -2.0]),
+        b_up=np.array([2.0, 2.0]),
+        steps=np.array([0.0, 0.0]),
+    )
+    generator = RandomCandidateGenerator(domain=domain, rng=np.random.default_rng(0))
+
+    # generate() is the validity-enforcing entry point used by both loops.
+    Xs, Ss = generator.generate(state=None, n_candidates=50)
+
+    assert Xs.shape == (50, 2)
+    assert np.all(Xs[:, 0] > 0.0)
+    assert Ss is None
+
+
+@pytest.mark.unit
+def test_domain_validity_impossible_raises():
+    """An unsatisfiable validity constraint raises ``RuntimeError`` after
+    exhausting ``max_valid_attempts``."""
+
+    class EmptyDomain(InputDomain):
+        def is_valid(self, X):
+            return np.zeros(X.shape[0], dtype=bool)
+
+    domain = EmptyDomain(
+        dim=1,
+        b_low=np.array([0.0]),
+        b_up=np.array([1.0]),
+        steps=np.array([0.0]),
+    )
+    generator = RandomCandidateGenerator(domain=domain, rng=np.random.default_rng(0))
+    generator.max_valid_attempts = 5
+
+    with pytest.raises(RuntimeError):
+        generator.generate(state=None, n_candidates=4)

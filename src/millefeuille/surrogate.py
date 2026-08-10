@@ -764,30 +764,19 @@ class RandomForestEnsembleModel(EnsembleModel):
             n_train x n_outputs
         """
         if X.ndim != 2:
-            raise ValueError(
-                f"Training X must have shape (n_train, d), "
-                f"but received {tuple(X.shape)}."
-            )
+            raise ValueError(f"Training X must have shape (n_train, d), but received {tuple(X.shape)}.")
 
         if Y.ndim == 1:
             Y = Y.unsqueeze(-1)
 
         if Y.ndim != 2:
-            raise ValueError(
-                f"Training Y must have shape (n_train, n_outputs), "
-                f"but received {tuple(Y.shape)}."
-            )
+            raise ValueError(f"Training Y must have shape (n_train, n_outputs), but received {tuple(Y.shape)}.")
 
         if X.shape[0] != Y.shape[0]:
-            raise ValueError(
-                "X and Y must contain the same number of training points."
-            )
+            raise ValueError("X and Y must contain the same number of training points.")
 
         if Y.shape[-1] != self._num_outputs:
-            raise ValueError(
-                f"Expected {self._num_outputs} outputs, "
-                f"but Y has {Y.shape[-1]} outputs."
-            )
+            raise ValueError(f"Expected {self._num_outputs} outputs, but Y has {Y.shape[-1]} outputs.")
 
         X_np = X.detach().cpu().double().numpy()
         Y_np = Y.detach().cpu().double().numpy()
@@ -805,9 +794,7 @@ class RandomForestEnsembleModel(EnsembleModel):
             *batch_shape x n_estimators x q x n_outputs
         """
         if X.ndim < 2:
-            raise ValueError(
-                "X must have shape (*batch_shape, q, d)."
-            )
+            raise ValueError("X must have shape (*batch_shape, q, d).")
 
         batch_shape = X.shape[:-2]
         q = X.shape[-2]
@@ -815,13 +802,7 @@ class RandomForestEnsembleModel(EnsembleModel):
 
         # (*batch_shape, q, d)
         # -> (prod(batch_shape) * q, d)
-        X_flat = (
-            X.detach()
-            .cpu()
-            .double()
-            .numpy()
-            .reshape(-1, d)
-        )
+        X_flat = X.detach().cpu().double().numpy().reshape(-1, d)
 
         predictions = []
 
@@ -948,8 +929,12 @@ class MultiOutputRandomForestSurrogate(BaseSurrogate):
         ``sklearn.ensemble.RandomForestRegressor``.
     """
 
-    def __init__(self, n_outputs: int, n_estimators: int = 100, max_depth: int | None = None, verbose: bool = False, **rf_kwargs):
-        self.model = RandomForestEnsembleModel(n_estimators=n_estimators, max_depth=max_depth, n_outputs=n_outputs, **rf_kwargs)
+    def __init__(
+        self, n_outputs: int, n_estimators: int = 100, max_depth: int | None = None, verbose: bool = False, **rf_kwargs
+    ):
+        self.model = RandomForestEnsembleModel(
+            n_estimators=n_estimators, max_depth=max_depth, n_outputs=n_outputs, **rf_kwargs
+        )
         self.verbose = verbose
         self.n_outputs = n_outputs
 
