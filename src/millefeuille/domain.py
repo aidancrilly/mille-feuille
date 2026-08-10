@@ -56,6 +56,29 @@ class InputDomain:
         bounds = np.stack([lb, ub])
         return bounds
 
+    def is_valid(self, X):
+        """Return a boolean mask flagging which candidate points are physically valid.
+
+        This is the single place where domain-level candidate validity is
+        defined.  Candidate generators call this to discard invalid points and
+        regenerate before any input files are written or jobs are launched, so
+        validity is a property of the parameter space rather than of the
+        downstream simulator.
+
+        The base implementation accepts every point (all candidates drawn via
+        ``inverse_transform`` already lie inside the box bounds).  Subclasses
+        should override this to encode additional physical constraints, e.g.
+        forbidden regions or coupled-parameter conditions.
+
+        Parameters:
+            X (np.ndarray): Candidate points in real units, shape (n_points, dim).
+
+        Returns:
+            np.ndarray: Boolean array of shape (n_points,) where ``True`` marks
+                a valid candidate.
+        """
+        return np.ones(X.shape[0], dtype=bool)
+
     @classmethod
     def read_json(cls, filepath: str) -> tuple["InputDomain", list[str]]:
         """Create an ``InputDomain`` (or subclass) from a JSON configuration file.
