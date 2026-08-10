@@ -2,14 +2,17 @@ import numpy as np
 import pytest
 import pytest_cases
 import torch
-from botorch.acquisition import qLogExpectedImprovement, qUpperConfidenceBound
-from botorch.acquisition.objective import ScalarizedPosteriorTransform
+from botorch.acquisition.multi_objective.logei import qLogExpectedHypervolumeImprovement
+from botorch.utils.multi_objective.hypervolume import Hypervolume
+from botorch.utils.multi_objective.pareto import is_non_dominated
+from millefeuille.acquisition import get_qLogEHVI_acq, get_qLogEI_acq, get_qLogEI_MF_acq, get_qUCB_acq, get_qUCB_MF_acq
 from millefeuille.domain import FidelityDomain, InputDomain
 from millefeuille.initialise import generate_initial_sample
 from millefeuille.optimise import suggest_next_locations
 from millefeuille.state import State
 from millefeuille.surrogate import (
     MultiFidelityGPSurrogate,
+    MultiObjectiveGPSurrogate,
     SingleFidelityGPSurrogate,
     SingleFidelityRandomForestSurrogate,
 )
@@ -22,6 +25,7 @@ from .conftest import (
     TEST_RAW_SAMPLES,
     ForresterDomain,
     ForresterSampler,
+    PythonBiObjectiveFunction,
     PythonForresterFunction,
 )
 
@@ -36,25 +40,20 @@ def batch_size(request):
     return request.param
 
 
-@pytest_cases.fixture(params=["qLogExpectedImprovement", "qUpperConfidenceBound"])
+@pytest_cases.fixture(params=["qLogEI", "qUCB"])
 def generate_acq_function(request):
-    if request.param == "qLogExpectedImprovement":
-        return lambda surrogate, state: qLogExpectedImprovement(surrogate.model, state.best_value_transformed)
-    elif request.param == "qUpperConfidenceBound":
-        return lambda surrogate, state: qUpperConfidenceBound(surrogate.model, beta=1.0)
+    if request.param == "qLogEI":
+        return get_qLogEI_acq
+    elif request.param == "qUCB":
+        return get_qUCB_acq
 
 
-@pytest_cases.fixture(params=["qLogExpectedImprovement", "qUpperConfidenceBound"])
+@pytest_cases.fixture(params=["qLogEI", "qUCB"])
 def generate_MF_acq_function(request):
-    post_transform = ScalarizedPosteriorTransform(weights=torch.tensor([1.0]))
-    if request.param == "qLogExpectedImprovement":
-        return lambda surrogate, state: qLogExpectedImprovement(
-            surrogate.model, state.best_value_transformed, posterior_transform=post_transform
-        )
-    elif request.param == "qUpperConfidenceBound":
-        return lambda surrogate, state: qUpperConfidenceBound(
-            surrogate.model, beta=1.0, posterior_transform=post_transform
-        )
+    if request.param == "qLogEI":
+        return get_qLogEI_MF_acq
+    elif request.param == "qUCB":
+        return get_qUCB_MF_acq
 
 
 @pytest_cases.fixture()
@@ -270,3 +269,58 @@ def test_optimise_multifidelity_GP(multifidelitysample, batch_size, generate_MF_
     )
 
     assert np.isclose(new_state.best_value, state.best_value, rtol=1e-2)
+
+
+@pytest_cases.fixture()
+def multiobjective_sample(ntrain):
+    Is = np.arange(ntrain)
+    Xs = np.linspace(0.0, 1.0, ntrain).reshape(-1, 1)
+    f = PythonBiObjectiveFunction()
+    _, Ys = f(Is, Xs)
+    return Is, Xs, Ys, f
+
+
+@pytest.mark.unit
+def test_optimise_multiobjective_GP(multiobjective_sample, batch_size):
+    Is, Xs, Ys, f = multiobjective_sample
+
+    state = State(ForresterDomain, Is, Xs, Ys)
+
+    surrogate = MultiObjectiveGPSurrogate(kernel=TEST_KERNEL, kernel_kwargs=TEST_KERNEL_KWARGS)
+    surrogate.fit(state)
+
+    acq_function = get_qLogEHVI_acq(surrogate, state)
+
+    # 1. Return type
+    assert isinstance(acq_function, qLogExpectedHypervolumeImprovement), (
+        "get_qLogEHVI_acq did not return qLogExpectedHypervolumeImprovement"
+    )
+
+    # 2. Default ref_point matches state.worst_value_transformed
+    expected_ref = torch.as_tensor(state.worst_value_transformed).flatten().double()
+    assert torch.allclose(acq_function.ref_point.double(), expected_ref), (
+        "ref_point does not match state.worst_value_transformed"
+    )
+
+    # 3. Candidate shape
+    X_next = suggest_next_locations(
+        batch_size, state, acq_function, num_restarts=TEST_NUM_RESTARTS, raw_samples=TEST_RAW_SAMPLES
+    )
+    assert X_next.shape == (batch_size, Xs.shape[1]), "suggest_next_locations returned unexpected shape"
+
+    # 4. Hypervolume is non-decreasing after one BO step
+    # Use a fixed reference point safely below all objective values in real space:
+    # f1, f2 in [-(0.8)^2, 0] = [-0.64, 0], so [-1.0, -1.0] is a valid lower bound
+    hv_ref = torch.tensor([-1.0, -1.0], dtype=torch.double)
+
+    Y_before = torch.tensor(state.Ys, dtype=torch.double)
+    hv_before = Hypervolume(ref_point=hv_ref).compute(Y_before[is_non_dominated(Y_before)])
+
+    I_next = np.amax(Is) + 1 + np.arange(batch_size)
+    _, Y_next = f(I_next, X_next)
+    state.update(I_next, X_next, Y_next)
+
+    Y_after = torch.tensor(state.Ys, dtype=torch.double)
+    hv_after = Hypervolume(ref_point=hv_ref).compute(Y_after[is_non_dominated(Y_after)])
+
+    assert hv_after >= hv_before, f"Hypervolume decreased after BO step: {hv_before:.6f} -> {hv_after:.6f}"

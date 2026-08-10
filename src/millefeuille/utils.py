@@ -288,6 +288,10 @@ def run_generator_loop(
             start = time.time()
             gen_start = time.time()
 
+        # Candidate generation returns only domain-valid candidates: the
+        # generator discards points rejected by ``domain.is_valid`` and
+        # regenerates internally, so invalid candidates never reach the
+        # simulator (no input files written, no jobs launched).
         index_next, X_next, S_next = generate_candidates(state, batch_size)
         if verbose:
             gen_time = time.time() - gen_start

@@ -59,18 +59,29 @@ class CandidateGenerator(ABC):
 
     Parameters:
         domain: ``InputDomain`` defining the parameter space.
+
+    Class attributes:
+        max_valid_attempts: Maximum number of regeneration rounds used to
+            fill a fully domain-valid batch when the domain rejects
+            candidates (see :meth:`generate`).
     """
+
+    max_valid_attempts: int = 1000
 
     def __init__(self, domain: InputDomain):
         self.domain = domain
 
     @abstractmethod
-    def generate(
+    def _generate(
         self,
         state: State,
         n_candidates: int,
     ) -> tuple[npt.NDArray, npt.NDArray | None]:
-        """Generate candidate inputs.
+        """Produce raw candidate inputs (no domain-validity enforcement).
+
+        Subclasses implement their sampling / acquisition strategy here.
+        Validity filtering is applied centrally by :meth:`generate`, so
+        implementations do not need to consult ``self.domain.is_valid``.
 
         Parameters:
             state:        Current optimisation state.
@@ -83,6 +94,61 @@ class CandidateGenerator(ABC):
                  single-fidelity problems.
         """
         ...
+
+    def generate(
+        self,
+        state: State,
+        n_candidates: int,
+    ) -> tuple[npt.NDArray, npt.NDArray | None]:
+        """Generate domain-valid candidate inputs.
+
+        Wraps the subclass :meth:`_generate`, discarding any candidate for
+        which ``self.domain.is_valid`` returns ``False`` and regenerating
+        until a full valid batch of *n_candidates* is collected (or
+        ``max_valid_attempts`` rounds are exhausted).
+
+        The default :meth:`InputDomain.is_valid` accepts every point, so when
+        no domain constraints are defined this returns the first draw
+        unchanged with no overhead.  Both the synchronous loop (via
+        :meth:`__call__`) and the asynchronous loop route through here, so
+        validity is enforced for every generator without any loop-side logic.
+
+        Returns:
+            Xs:  Valid input array of shape ``(N, dim)`` with ``N <= n_candidates``.
+            Ss:  Fidelity array of shape ``(N, 1)`` or ``None``.
+        """
+        Xs, Ss = self._generate(state, n_candidates)
+
+        mask = np.asarray(self.domain.is_valid(Xs), dtype=bool)
+        if mask.all():
+            # Fast path: nothing rejected — identical to the raw generator.
+            return Xs, Ss
+
+        X_valid = Xs[mask]
+        S_valid = Ss[mask] if Ss is not None else None
+
+        for _ in range(self.max_valid_attempts - 1):
+            if len(X_valid) >= n_candidates:
+                break
+
+            Xs, Ss = self._generate(state, n_candidates)
+            mask = np.asarray(self.domain.is_valid(Xs), dtype=bool)
+
+            X_valid = np.concatenate([X_valid, Xs[mask]], axis=0)
+            if S_valid is not None and Ss is not None:
+                S_valid = np.concatenate([S_valid, Ss[mask]], axis=0)
+
+        if len(X_valid) < n_candidates:
+            raise RuntimeError(
+                f"{type(self).__name__}: only found {len(X_valid)} of "
+                f"{n_candidates} requested domain-valid candidates after "
+                f"{self.max_valid_attempts} attempts. Check the domain's "
+                f"is_valid constraints."
+            )
+
+        X_valid = X_valid[:n_candidates]
+        S_valid = S_valid[:n_candidates] if S_valid is not None else None
+        return X_valid, S_valid
 
     def __call__(
         self,
@@ -138,7 +204,7 @@ class RandomCandidateGenerator(CandidateGenerator):
         self.fidelity_probs = fidelity_probs
         self._rng = rng or np.random.default_rng()
 
-    def generate(self, state, n_candidates):
+    def _generate(self, state, n_candidates):
         if self.sampler is not None:
             X_unit = self.sampler.random(n_candidates)
         else:
@@ -193,7 +259,7 @@ class BayesianOptimisationGenerator(CandidateGenerator):
         self.verbose = verbose
         self._optim_kwargs = optim_kwargs
 
-    def generate(self, state, n_candidates):
+    def _generate(self, state, n_candidates):
         if self.refit_surrogate:
             self.surrogate.fit(state)
 
@@ -292,7 +358,7 @@ class ThresholdCandidateGenerator(CandidateGenerator):
         self.pool_try_multiplier = pool_try_multiplier
         self._rng = rng or np.random.default_rng()
 
-    def generate(self, state, n_candidates):
+    def _generate(self, state, n_candidates):
         if self.refit_surrogate:
             self.surrogate.fit(state)
 
@@ -414,7 +480,7 @@ class SurrogateThresholdCandidateGenerator(CandidateGenerator):
         self.pool_try_multiplier = pool_try_multiplier
         self._rng = rng or np.random.default_rng()
 
-    def generate(self, state, n_candidates):
+    def _generate(self, state, n_candidates):
         if self.refit_surrogate:
             self.surrogate.fit(state)
 
@@ -520,9 +586,9 @@ class GreedyExclusionGenerator(CandidateGenerator):
         self.pool_multiplier = pool_multiplier
         self.n_clusters = n_clusters
 
-    def generate(self, state, n_candidates):
+    def _generate(self, state, n_candidates):
         pool_request = n_candidates * self.pool_multiplier
-        Xs, Ss = self.inner.generate(state, pool_request)
+        Xs, Ss = self.inner._generate(state, pool_request)
 
         if len(Xs) == 0:
             return Xs, Ss
@@ -617,7 +683,7 @@ class ThresholdExclusionGenerator(CandidateGenerator):
         self.pool_try_multiplier = pool_try_multiplier
         self._rng = rng or np.random.default_rng()
 
-    def generate(self, state, n_candidates):
+    def _generate(self, state, n_candidates):
         if self.refit_surrogate:
             self.surrogate.fit(state)
 
@@ -802,7 +868,7 @@ class MetropolisHastingsGenerator(CandidateGenerator):
     # CandidateGenerator interface
     # ------------------------------------------------------------------
 
-    def generate(self, state: State, n_candidates: int) -> tuple[npt.NDArray, None]:
+    def _generate(self, state: State, n_candidates: int) -> tuple[npt.NDArray, None]:
         if state.l_MultiFidelity:
             raise NotImplementedError("MetropolisHastingsGenerator does not currently support multi-fidelity problems.")
 

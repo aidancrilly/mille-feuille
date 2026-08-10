@@ -19,7 +19,7 @@ dynamic = ["version"]
 [project.optional-dependencies]
 dev = [
     "pre-commit",
-    "pytest",
+    "pytest<9.1.0",
     "pytest-regressions",
     "pytest-cases",
     "f90nml",

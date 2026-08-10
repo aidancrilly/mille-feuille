@@ -94,3 +94,21 @@ class Uniform(qmc.QMCEngine):
     def fast_forward(self, n):
         self.random(n)
         return self
+
+
+class PythonBiObjectiveFunction(PythonSimulator):
+    """
+    Simple 2-objective 1-D test function for MOBO.
+
+    Maximise both:
+      f1(x) = -(x - 0.2)^2   (optimum at x=0.2)
+      f2(x) = -(x - 0.8)^2   (optimum at x=0.8)
+
+    The two objectives are in conflict, so there is a non-trivial
+    Pareto front across x in [0, 1].
+    """
+
+    def __call__(self, indices, Xs, Ss=None):
+        f1 = -((Xs - 0.2) ** 2)  # shape (N, 1)
+        f2 = -((Xs - 0.8) ** 2)  # shape (N, 1)
+        return None, np.hstack([f1, f2])  # shape (N, 2)
