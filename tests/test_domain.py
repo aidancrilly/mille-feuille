@@ -26,6 +26,65 @@ def b_up(dim, b_low):
 
 
 @pytest.mark.unit
+def test_domain_defaults_to_continuous(dim, b_low, b_up):
+    """Omitting steps gives a fully continuous domain."""
+    domain = InputDomain(dim=dim, b_low=b_low, b_up=b_up)
+
+    np.testing.assert_array_equal(domain.steps, np.zeros(dim))
+    assert domain.discrete_indices == []
+    assert domain.discrete_dim == 0
+
+
+@pytest.mark.unit
+def test_domain_infers_dim_from_bounds(dim, b_low, b_up):
+    """dim is inferred from the bounds when not given, and lists are accepted."""
+    domain = InputDomain(b_low=b_low.tolist(), b_up=b_up.tolist())
+
+    assert domain.dim == dim
+    np.testing.assert_array_almost_equal(domain.b_low, b_low)
+    np.testing.assert_array_almost_equal(domain.b_up, b_up)
+
+
+@pytest.mark.unit
+def test_domain_defaults_to_unit_hypercube(dim):
+    """Given only dim, the domain is the unit hypercube."""
+    domain = InputDomain(dim=dim)
+
+    np.testing.assert_array_equal(domain.b_low, np.zeros(dim))
+    np.testing.assert_array_equal(domain.b_up, np.ones(dim))
+    np.testing.assert_array_equal(domain.steps, np.zeros(dim))
+
+
+@pytest.mark.unit
+def test_read_json_without_steps(tmp_path):
+    """The steps entry is optional in a domain JSON file."""
+    import json
+
+    filepath = tmp_path / "Domain.json"
+    with open(filepath, "w") as f:
+        json.dump({"params": {"names": ["a", "b"], "lower_bounds": [0.0, 1.0], "upper_bounds": [1.0, 2.0]}}, f)
+
+    domain, names = InputDomain.read_json(str(filepath))
+
+    assert names == ["a", "b"]
+    assert domain.dim == 2
+    np.testing.assert_array_equal(domain.steps, np.zeros(2))
+
+
+@pytest.mark.unit
+def test_domain_rejects_bad_specification():
+    """Inconsistent or unusable domain specifications raise."""
+    with pytest.raises(ValueError):
+        InputDomain()  # neither dim nor bounds
+
+    with pytest.raises(ValueError):
+        InputDomain(dim=3, b_low=np.zeros(2), b_up=np.ones(2))  # mismatched shapes
+
+    with pytest.raises(ValueError):
+        InputDomain(b_low=np.ones(2), b_up=np.zeros(2))  # b_up below b_low
+
+
+@pytest.mark.unit
 def test_continuous_domain(nsample, dim, b_low, b_up):
     domain = InputDomain(dim=dim, b_low=b_low, b_up=b_up, steps=np.zeros_like(b_low))
 

@@ -51,9 +51,9 @@ Take a look at the examples directory and sub-directories within
 
 `mille‑feuille` implements the following containers:
 
-1. *InputDomain* holds the bounded input domain which can be a mix of continuous and discrete dimensions. Domains can be created from a JSON file with `InputDomain.read_json(filepath)`.
-2. *FidelityDomain* holds information regarding the degrees of simulation fidelity.
-3. *State* holds the necessary data taken from simulation samples: indices (Is), inputs (Xs), output parameters (Ps), fidelities (Ss) and objectives (Ys). State now supports **empty initialisation** (all arrays `None`) with lazy naming on the first update — useful for workflows where no data exists at construction time. Persistence uses **SQLite** (`state.save()` / `State.load()`) for robust, append-friendly storage.
+1. *InputDomain* holds the bounded input domain which can be a mix of continuous and discrete dimensions. Only the bounds are needed — `steps` defaults to a fully continuous domain, `dim` is inferred from the bounds, and the bounds themselves default to the unit hypercube, so `InputDomain(b_low=[0.0, 1.0], b_up=[1.0, 2.0])` and `InputDomain(dim=2)` are both valid. Domains can be created from a JSON file with `InputDomain.read_json(filepath)`.
+2. *FidelityDomain* holds information regarding the degrees of simulation fidelity, defaulting to two equal-cost fidelities.
+3. *State* holds the necessary data taken from simulation samples: indices (Is), inputs (Xs), output parameters (Ps), fidelities (Ss) and objectives (Ys). All sample arrays default to `None`, so an **empty state** ready to be filled is just `State(domain)`, with lazy naming on the first update — useful for workflows where no data exists at construction time. `state.update(None, Xs, Ys)` numbers the new samples automatically, continuing on from any already stored. Persistence uses **SQLite** (`state.save()` / `State.load()`) for robust, append-friendly storage.
 
 These classes hold the necessary information to train surrogate models. `mille‑feuille` has a number of abstract base classes as well as concrete examples of surrogate models including **Gaussian Processes** (using GPyTorch and BOTorch), **Neural Network Ensembles** (using PyTorch and BOTorch) and **Random Forest ensembles** (via scikit-learn's `RandomForestRegressor`).
 

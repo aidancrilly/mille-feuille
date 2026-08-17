@@ -5,7 +5,7 @@ import tempfile
 
 import numpy as np
 import pytest
-from millefeuille.domain import InputDomain, ScaleFactorInputDomain
+from millefeuille.domain import FidelityDomain, InputDomain, ScaleFactorInputDomain
 from millefeuille.state import State
 
 from .conftest import ForresterDomain
@@ -118,6 +118,50 @@ def test_to_csv_skips_existing_index_values():
 
 
 @pytest.mark.unit
+def test_empty_state_from_domain_alone():
+    """A state with no data yet is built from just the input domain."""
+    domain = InputDomain(dim=1, b_low=np.array([0.0]), b_up=np.array([1.0]), steps=np.zeros(1))
+    empty_state = State(domain)
+
+    assert empty_state.index is None
+    assert empty_state.Xs is None
+    assert empty_state.Ys is None
+    assert empty_state.Ps is None
+    assert empty_state.Ss is None
+    assert empty_state.nsamples == 0
+    assert empty_state.Y_scaler is None
+    assert empty_state.best_value == -np.inf
+    assert empty_state.worst_value == np.inf
+
+
+@pytest.mark.unit
+def test_empty_state_single_update_fits_scaler():
+    """The first update fits a scaler, so the state is immediately transformable."""
+    domain = InputDomain(dim=1, b_low=np.array([0.0]), b_up=np.array([1.0]), steps=np.zeros(1))
+    state = State(domain)
+
+    state.update(np.array([0.0]), np.array([[0.5]]), np.array([[0.3]]))
+
+    assert state.Y_scaler is not None
+    X_torch, Y_torch = state.transform_XY()
+    assert X_torch.shape == (1, 1)
+    assert Y_torch.shape == (1, 1)
+
+
+@pytest.mark.unit
+def test_update_generates_indices_when_none():
+    """Passing index_next=None continues the index count from the stored samples."""
+    domain = InputDomain(dim=1, b_low=np.array([0.0]), b_up=np.array([1.0]), steps=np.zeros(1))
+    state = State(domain)
+
+    state.update(None, np.array([[0.1], [0.2]]), np.array([[0.1], [0.2]]))
+    np.testing.assert_array_equal(state.index.ravel(), [0, 1])
+
+    state.update(None, np.array([[0.3]]), np.array([[0.3]]))
+    np.testing.assert_array_equal(state.index.ravel(), [0, 1, 2])
+
+
+@pytest.mark.unit
 def test_filling_empty_state():
     dummy_domain = InputDomain(dim=1, b_low=np.array([0.0]), b_up=np.array([1.0]), steps=np.zeros(1))
     empty_state = State(dummy_domain, index=None, Xs=None, Ys=None)
@@ -150,6 +194,26 @@ def test_filling_empty_state():
 
     assert empty_state.best_value == 0.3
     assert empty_state.best_value_transformed > -np.inf
+
+
+@pytest.mark.unit
+def test_multifidelity_state_without_target_fidelity_samples():
+    """Low-fidelity-only data leaves the extrema at their placeholders."""
+    domain = InputDomain(dim=1, b_low=np.array([0.0]), b_up=np.array([1.0]), steps=np.zeros(1))
+    state = State(domain, fidelity_domain=FidelityDomain(num_fidelities=2))
+
+    # Only fidelity 0 sampled so far — the target fidelity is 1
+    state.update(None, np.array([[0.1], [0.2]]), np.array([[0.1], [0.2]]), S_next=np.zeros((2, 1)))
+
+    assert state.nsamples == 2
+    assert state.best_value == -np.inf
+    assert state.worst_value == np.inf
+
+    # A target-fidelity sample sets the extrema
+    state.update(None, np.array([[0.3]]), np.array([[0.5]]), S_next=np.ones((1, 1)))
+
+    assert state.best_value == 0.5
+    assert state.worst_value == 0.5
 
 
 # ---------------------------------------------------------------------------

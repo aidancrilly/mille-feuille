@@ -31,8 +31,8 @@ if __name__ == "__main__":
     log2sample = int(np.ceil(np.log2(initial_samples)))
     n_initial = 2**log2sample
     index_next, X_next, _ = generator(
-        # A minimal State with no data yet
-        mf.State(input_domain=domain, index=np.array([-1])),
+        # An empty State with no data yet
+        mf.State(domain),
         n_initial,
     )
     index_next = np.arange(current_iter, current_iter + n_initial)

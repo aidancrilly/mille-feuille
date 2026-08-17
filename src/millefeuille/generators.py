@@ -157,8 +157,8 @@ class CandidateGenerator(ABC):
     ) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray | None]:
         """Generate candidates and assign indices.
 
-        Calls ``self.generate`` then builds contiguous indices starting
-        from ``state.index.max() + 1``.
+        Calls ``self.generate`` then builds contiguous indices continuing on
+        from those already in *state* via ``state.next_indices``.
 
         Returns:
             indices:  1-D integer array of length ``N``.
@@ -166,9 +166,7 @@ class CandidateGenerator(ABC):
             Ss:       Fidelity array ``(N, 1)`` or ``None``.
         """
         Xs, Ss = self.generate(state, n_candidates)
-        n = Xs.shape[0]
-        index_start = int(state.index.max()) + 1 if state.index is not None else 0
-        indices = index_start + np.arange(n)
+        indices = state.next_indices(Xs.shape[0])
         return indices, Xs, Ss
 
 
