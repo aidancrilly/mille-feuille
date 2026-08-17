@@ -17,29 +17,67 @@ class InputDomain:
     to the unit hypercube [0, 1]^d. Continuous dimensions are specified with steps=0.0,
     while discrete dimensions have non-zero step sizes.
 
+    Every field has a default, so a domain can be built from bounds alone
+    (``InputDomain(b_low=[0.0, 1.0], b_up=[1.0, 2.0])``, all dimensions continuous)
+    or from a dimensionality alone (``InputDomain(dim=3)``, the unit hypercube).
+
     Attributes:
-        dim (int): Total number of dimensions in the domain.
+        dim (int): Total number of dimensions in the domain. Inferred from the length of
+            ``b_low`` / ``b_up`` / ``steps`` when not given.
         b_low (np.ndarray): Lower bounds of each dimension in real units (shape: (dim,)).
+            Defaults to zeros, i.e. the lower face of the unit hypercube.
         b_up (np.ndarray): Upper bounds of each dimension in real units (shape: (dim,)).
+            Defaults to ones, i.e. the upper face of the unit hypercube.
         steps (np.ndarray): Step sizes for each dimension. Zero indicates continuous dimension,
             non-zero indicates discrete dimension with that step size (shape: (dim,)).
+            Defaults to zeros, i.e. a fully continuous domain.
         discrete_indices (list): Indices of discrete dimensions (computed in __post_init__).
         discrete_dim (int): Number of discrete dimensions (computed in __post_init__).
         discrete_bound (list): Number of discrete levels for each discrete dimension
             (computed in __post_init__).
     """
 
-    dim: int
-    b_low: np.ndarray
-    b_up: np.ndarray
-    steps: np.ndarray
+    dim: None | int = None
+    b_low: None | np.ndarray = None
+    b_up: None | np.ndarray = None
+    steps: None | np.ndarray = None
 
     def __post_init__(self):
-        """Compute discrete dimension indices and bounds after initialization.
+        """Fill in defaulted fields then compute discrete dimension indices and bounds.
 
-        Sets discrete_indices, discrete_dim, and discrete_bound attributes based on
-        the steps array. Dimensions with steps[i] != 0.0 are treated as discrete.
+        ``dim`` is inferred from any supplied bound array, and any bound array left as
+        ``None`` falls back to the unit hypercube with continuous dimensions. Sets
+        discrete_indices, discrete_dim, and discrete_bound attributes based on the steps
+        array. Dimensions with steps[i] != 0.0 are treated as discrete.
         """
+        # Accept lists/tuples as well as arrays
+        self.b_low = None if self.b_low is None else np.asarray(self.b_low, dtype=float)
+        self.b_up = None if self.b_up is None else np.asarray(self.b_up, dtype=float)
+        self.steps = None if self.steps is None else np.asarray(self.steps, dtype=float)
+
+        # Infer the dimensionality from whichever arrays were supplied
+        if self.dim is None:
+            for array in (self.b_low, self.b_up, self.steps):
+                if array is not None:
+                    self.dim = array.shape[0]
+                    break
+        if self.dim is None:
+            raise ValueError("InputDomain needs either dim or one of b_low / b_up / steps to be specified")
+
+        # Default to the unit hypercube with every dimension continuous
+        if self.b_low is None:
+            self.b_low = np.zeros(self.dim)
+        if self.b_up is None:
+            self.b_up = np.ones(self.dim)
+        if self.steps is None:
+            self.steps = np.zeros(self.dim)
+
+        for name, array in (("b_low", self.b_low), ("b_up", self.b_up), ("steps", self.steps)):
+            if array.shape != (self.dim,):
+                raise ValueError(f"InputDomain {name} has shape {array.shape}, expected ({self.dim},)")
+        if np.any(self.b_up <= self.b_low):
+            raise ValueError("InputDomain requires b_up > b_low in every dimension")
+
         self.discrete_indices = [i for i in range(self.dim) if self.steps[i] != 0.0]
         self.discrete_dim = len(self.discrete_indices)
         self.discrete_bound = [int((self.b_up[i] - self.b_low[i]) / self.steps[i]) for i in self.discrete_indices]
@@ -84,7 +122,8 @@ class InputDomain:
         """Create an ``InputDomain`` (or subclass) from a JSON configuration file.
 
         The JSON file must contain a ``"params"`` object with keys
-        ``"names"``, ``"lower_bounds"``, ``"upper_bounds"`` and ``"steps"``.
+        ``"names"``, ``"lower_bounds"`` and ``"upper_bounds"``.  ``"steps"`` is
+        optional and defaults to a fully continuous domain when absent.
 
         Parameters:
             filepath: Path to the JSON file.
@@ -100,7 +139,7 @@ class InputDomain:
         names = params["names"]
         b_low = np.array(params["lower_bounds"])
         b_up = np.array(params["upper_bounds"])
-        steps = np.array(params["steps"])
+        steps = np.array(params["steps"]) if params.get("steps") is not None else None
 
         domain = cls(dim=len(names), b_low=b_low, b_up=b_up, steps=steps)
         return domain, names
@@ -302,9 +341,13 @@ class FidelityDomain:
     Defines the fidelity space domain which is discrete
 
     One can assign costs to each fidelity here
+
+    num_fidelities = number of discrete fidelity levels, defaults to the
+        minimal multi-fidelity problem of two levels
+    costs = cost of a sample at each fidelity, defaults to unit cost throughout
     """
 
-    num_fidelities: int
+    num_fidelities: int = 2
     costs: None | list = None
 
     def __post_init__(self):

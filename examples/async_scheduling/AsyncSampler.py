@@ -123,13 +123,7 @@ if __name__ == "__main__":
         print(f"Loaded state from {db_name} with {len(state.index)} completed evaluations.")
         index_start = max(state.index) + 1
     except FileNotFoundError:
-        state = State(
-            input_domain=domain,
-            index=None,
-            Xs=None,
-            Ys=None,
-            X_names=X_names,
-        )
+        state = State(input_domain=domain, X_names=X_names)
         index_start = 0
 
     # ── Surrogate ─────────────────────────────────────────────────────────
