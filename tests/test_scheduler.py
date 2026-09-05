@@ -1,3 +1,4 @@
+import threading
 import time
 
 import numpy as np
@@ -5,7 +6,7 @@ import pytest
 from millefeuille.asynch import AsyncScheduler
 from millefeuille.domain import InputDomain
 from millefeuille.generators import RandomCandidateGenerator
-from millefeuille.simulator import FidelityConfig, PythonSimulator, ResourceManager
+from millefeuille.simulator import FidelityConfig, PythonSimulator, ResourceManager, Scheduler
 from millefeuille.state import State
 from millefeuille.utils import run_generator_loop
 
@@ -199,3 +200,187 @@ def test_run_generator_loop_with_random_generator():
     # Check all Y values are -sum(x^2)
     expected_Ys = -np.sum(state.Xs**2, axis=-1, keepdims=True)
     np.testing.assert_allclose(state.Ys, expected_Ys, atol=1e-12)
+
+
+# ---------------------------------------------------------------------------
+# Test: Scheduler._normalise_nprocs
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_normalise_nprocs_int_broadcast():
+    result = Scheduler._normalise_nprocs(3, 4)
+    assert result == [3, 3, 3, 3]
+
+
+@pytest.mark.unit
+def test_normalise_nprocs_list():
+    result = Scheduler._normalise_nprocs([1, 2, 4], 3)
+    assert result == [1, 2, 4]
+
+
+@pytest.mark.unit
+def test_normalise_nprocs_mismatched_length():
+    with pytest.raises(ValueError, match="len\\(nprocs\\)"):
+        Scheduler._normalise_nprocs([1, 2], 3)
+
+
+# ---------------------------------------------------------------------------
+# Test: FidelityConfig.from_simulator
+# ---------------------------------------------------------------------------
+
+
+class CoresAwareSimulator(PythonSimulator):
+    def __call__(self, indices, Xs, Ss=None):
+        return None, -np.sum(Xs**2, axis=-1, keepdims=True)
+
+    def cores_required(self, s: int) -> int:
+        return {0: 1, 1: 4}[s]
+
+
+@pytest.mark.unit
+def test_fidelity_config_from_simulator():
+    sim = CoresAwareSimulator()
+    configs = FidelityConfig.from_simulator(sim, [0, 1], reserve={1: True})
+    assert configs[0].cores_required == 1
+    assert configs[0].reserve is False
+    assert configs[1].cores_required == 4
+    assert configs[1].reserve is True
+
+
+@pytest.mark.unit
+def test_fidelity_config_from_simulator_not_implemented():
+    sim = DelaySimulator(delay=0.0)  # does not override cores_required
+    with pytest.raises(NotImplementedError):
+        FidelityConfig.from_simulator(sim, [0, 1])
+
+
+# ---------------------------------------------------------------------------
+# Test: AsyncScheduler auto-infer fidelity_configs
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_async_scheduler_auto_infer_from_simulator():
+    sim = CoresAwareSimulator()
+    rm = ResourceManager(total_cores=8)
+    sched = AsyncScheduler(simulator=sim, resource_manager=rm)
+    # create_tasks should pick up cores from simulator.cores_required
+    indices = np.array([0, 1])
+    Xs = np.array([[0.5], [0.8]])
+    Ss = np.array([[0], [1]])
+    tasks = sched.create_tasks(indices, Xs, Ss)
+    assert tasks[0].cores_required == 1
+    assert tasks[1].cores_required == 4
+
+
+# ---------------------------------------------------------------------------
+# Test: tasks_in_flight / n_tasks_in_flight
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_tasks_in_flight_empty():
+    sched = AsyncScheduler(
+        simulator=DelaySimulator(delay=0.1),
+        resource_manager=ResourceManager(total_cores=4),
+    )
+    assert sched.tasks_in_flight() == []
+    assert sched.n_tasks_in_flight() == 0
+
+
+@pytest.mark.unit
+def test_tasks_in_flight_during_run():
+    """Verify tasks_in_flight reports running tasks via the on_tasks_complete callback."""
+    observed_in_flight: list[int] = []
+    delay = 0.2
+
+    def callback(state, num_completed):
+        # The scheduler should still have some tasks in flight
+        observed_in_flight.append(sched.n_tasks_in_flight())
+        return None
+
+    sched = AsyncScheduler(
+        simulator=DelaySimulator(delay=delay),
+        resource_manager=ResourceManager(total_cores=8),
+        fidelity_configs={0: FidelityConfig(cores_required=1), 1: FidelityConfig(cores_required=1)},
+        poll_interval=0.02,
+    )
+
+    n_tasks = 6
+    indices = np.arange(n_tasks)
+    Xs = np.random.rand(n_tasks, 1)
+    Ss = np.array([[0], [1], [0], [1], [0], [1]])
+
+    state = _make_empty_state()
+    tasks = sched.create_tasks(indices, Xs, Ss)
+    sched.run(state, tasks, on_tasks_complete=callback)
+
+    assert state.nsamples == n_tasks
+    # After all tasks complete and run() returns, no tasks in flight
+    assert sched.n_tasks_in_flight() == 0
+
+
+@pytest.mark.unit
+def test_tasks_in_flight_fidelity_filter():
+    """Filter tasks_in_flight by fidelity using the on_tasks_complete callback."""
+    observed_lf: list[int] = []
+    observed_hf: list[int] = []
+
+    def callback(state, num_completed):
+        observed_lf.append(sched.n_tasks_in_flight(fidelity=0))
+        observed_hf.append(sched.n_tasks_in_flight(fidelity=1))
+        return None
+
+    sched = AsyncScheduler(
+        simulator=DelaySimulator(delay=0.15),
+        resource_manager=ResourceManager(total_cores=8),
+        fidelity_configs={0: FidelityConfig(cores_required=1), 1: FidelityConfig(cores_required=1)},
+        poll_interval=0.02,
+    )
+
+    indices = np.arange(4)
+    Xs = np.random.rand(4, 1)
+    Ss = np.array([[0], [0], [1], [1]])
+
+    state = _make_empty_state()
+    tasks = sched.create_tasks(indices, Xs, Ss)
+    sched.run(state, tasks, on_tasks_complete=callback)
+
+    assert state.nsamples == 4
+
+
+@pytest.mark.unit
+def test_tasks_in_flight_thread_safety():
+    """Concurrent reads of tasks_in_flight from another thread don't raise."""
+    sched = AsyncScheduler(
+        simulator=DelaySimulator(delay=0.1),
+        resource_manager=ResourceManager(total_cores=4),
+        fidelity_configs={0: FidelityConfig(cores_required=1)},
+        poll_interval=0.02,
+    )
+
+    errors = []
+
+    def reader():
+        for _ in range(50):
+            try:
+                sched.tasks_in_flight()
+                sched.n_tasks_in_flight(fidelity=0)
+            except Exception as e:
+                errors.append(e)
+            time.sleep(0.01)
+
+    t = threading.Thread(target=reader)
+    t.start()
+
+    indices = np.arange(4)
+    Xs = np.random.rand(4, 1)
+    Ss = np.zeros((4, 1))
+
+    state = _make_empty_state()
+    tasks = sched.create_tasks(indices, Xs, Ss)
+    sched.run(state, tasks)
+    t.join()
+
+    assert errors == [], f"Thread-safety errors: {errors}"
