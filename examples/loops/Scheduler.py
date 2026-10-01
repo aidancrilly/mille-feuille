@@ -73,8 +73,7 @@ class PBSMPIScheduler(Scheduler):
             host_file = f"./.tmp/hosts_batch_{ibatch}_{index}.txt"
 
             with open(host_file, "w") as f:
-                for ihost in range(ibatch * nproc, (ibatch + 1) * nproc):
-                    f.write(self._hosts[ihost] + "\n")
+                f.writelines(self._hosts[ihost] + "\n" for ihost in range(ibatch * nproc, (ibatch + 1) * nproc))
 
             if Nhosts == 1:
                 exe_cmd = f'{self._mpiexec} -n {nproc} {exe} "{input_path}"'
