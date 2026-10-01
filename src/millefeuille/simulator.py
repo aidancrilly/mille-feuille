@@ -35,19 +35,16 @@ class Scheduler(ABC):
             inputs: List of input file paths
             indices: List of run indices (for logging/output naming)
         """
-        pass
 
     @property
     @abstractmethod
     def mpiexec(self) -> str:
         """Path to `mpiexec` or equivalent MPI launch command."""
-        pass
 
     @property
     @abstractmethod
     def output_dir(self) -> str:
         """Directory to store stdout/stderr log files."""
-        pass
 
 
 class ExectuableSimulator(ABC):

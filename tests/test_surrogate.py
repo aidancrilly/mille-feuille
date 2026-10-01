@@ -6,7 +6,6 @@ import numpy as np
 import pytest
 import pytest_cases
 import torch
-import torch.nn as nn
 from botorch.exceptions.warnings import OptimizationWarning
 from millefeuille.initialise import generate_initial_sample
 from millefeuille.state import State
@@ -16,6 +15,7 @@ from millefeuille.surrogate import (
     SingleFidelityGPSurrogate,
     SingleFidelityRandomForestSurrogate,
 )
+from torch import nn
 
 from .conftest import (
     TEST_KERNEL,

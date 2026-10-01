@@ -6,7 +6,6 @@ from typing import Dict, List
 import numpy as np
 import numpy.typing as npt
 import torch
-import torch.nn as nn
 from botorch.fit import fit_gpytorch_mll
 from botorch.models import ModelListGP, SingleTaskGP
 from botorch.models.ensemble import EnsembleModel
@@ -17,7 +16,7 @@ from gpytorch.likelihoods import GaussianLikelihood
 from gpytorch.mlls import ExactMarginalLogLikelihood, SumMarginalLogLikelihood
 from gpytorch.module import Module
 from sklearn.ensemble import RandomForestRegressor
-from torch import Tensor
+from torch import Tensor, nn
 from torch.utils.data import DataLoader, TensorDataset, random_split
 
 from .definitions import device, dtype
@@ -38,7 +37,6 @@ class BaseSurrogate(ABC):
         """
         Train the surrogate model on the current optimisation state.
         """
-        pass
 
     @abstractmethod
     def predict(self, state: State, Xs: npt.NDArray):
@@ -49,7 +47,6 @@ class BaseSurrogate(ABC):
             - If single objective: np.ndarray of shape (N, 2) -> mean, std
             - If multi-objective: dict {key: (mean, std)}
         """
-        pass
 
     def print_fit_summary(self):
         """
@@ -79,21 +76,18 @@ class BaseSurrogate(ABC):
         """
         Set internal models to evaluation mode (PyTorch).
         """
-        pass
 
     @abstractmethod
     def save(self, filepath: str):
         """
         Save trained model to disk.
         """
-        pass
 
     @abstractmethod
     def load(self, filepath: str, eval=True):
         """
         Load a saved model.
         """
-        pass
 
 
 ##################################################
@@ -165,7 +159,6 @@ class BaseGPSurrogate(BaseSurrogate, ABC):
         """
         Train the surrogate model on the current optimisation state.
         """
-        pass
 
     def update_state_dicts(self):
         """
@@ -459,7 +452,6 @@ class BasePyTorchModel(nn.Module, ABC):
         """
         Creates a instance of BasePyTorchModel from a given state_dict
         """
-        pass
 
 
 class EnsemblePyTorchModel(EnsembleModel):
